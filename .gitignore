@@ -1,0 +1,68 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Java / Maven / Spring
+.target/
+target/
+*.class
+*.jar
+*.war
+!.mvn/wrapper/maven-wrapper.jar
+
+# Node tooling and frontend assets
+node_modules/
+dist/
+build/
+.npm/
+
+# IDE and editor files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.iml
+.DS_Store
+
+# Local infrastructure and generated data
+redis-data/
+postgres-data/
+qdrant-data/
+logs/
+coverage/
+reports/
+*.log
+*.pid
+
+# Terraform / Ansible generated files
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.retry
+
+# Temporary files
+*.tmp
+*.swp
+.DS_Store
