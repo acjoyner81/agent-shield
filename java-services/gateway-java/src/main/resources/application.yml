@@ -1,0 +1,49 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-java
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${AUTH0_ISSUER:https://dev-zymaiayb0afkpn7n.us.auth0.com/}
+          audiences: ${AUTH0_AUDIENCE:https://api.agentshield.local}
+  cloud:
+    gateway:
+      routes:
+        - id: portal-frontend-api
+          uri: http://gateway-python:8000
+          predicates:
+            - Path=/api/v1/**
+
+        - id: fastapi-llm-proxy
+          uri: http://gateway-python:8000
+          predicates:
+            - Path=/v1/chat/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+
+        - id: spring-ai-mcp-tools
+          uri: http://mcp-server:8081
+          predicates:
+            - Path=/mcp/**
+
+        - id: angular-dev-server
+          uri: http://portal-frontend:80
+          predicates:
+            - Path=/**
+  data:
+    redis:
+      host: redis
+      port: 6379
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway

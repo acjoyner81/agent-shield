@@ -1,0 +1,106 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: agentshield-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gateway-java:
+    build: ./java-services/gateway-java
+    container_name: agentshield-java-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: ${AUTH0_ISSUER:-https://dev-zymaiayb0afkpn7n.us.auth0.com/}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES: ${AUTH0_AUDIENCE:-https://api.agentshield.local}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  gateway-python:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: agentshield-python-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-dev-zymaiayb0afkpn7n.us.auth0.com}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.agentshield.local}
+      AUTH0_ISSUER: ${AUTH0_ISSUER:-https://dev-zymaiayb0afkpn7n.us.auth0.com/}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  mcp-server:
+    build: ./java-services/mcp-server
+    container_name: agentshield-mcp-java
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATA_REDIS_HOST: redis
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  splunk:
+    image: splunk/splunk:latest
+    container_name: agentshield-splunk
+    environment:
+      SPLUNK_START_ARGS: --accept-license
+      SPLUNK_GENERAL_TERMS: --accept-sgt-current-at-splunk-com
+      SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:?Set SPLUNK_PASSWORD in .env}
+    ports:
+      - "8001:8000"
+      - "8088:8088"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  portal-frontend:
+    build:
+      context: ./portal-frontend  # Update path if your UI folder is named differently (e.g., ./ui or ./web)
+      dockerfile: Dockerfile
+    container_name: agentshield-frontend
+    ports:
+      - "4200:80"  # Exposes web UI on http://localhost:4200 (change to "3000:3000" for React/Vite dev mode)
+    environment:
+      - API_URL=http://localhost:8000
+    depends_on:
+      - gateway-python
+      - gateway-java
+
+  tripwire:
+    build:
+      context: ./tripwire
+      dockerfile: Dockerfile
+    container_name: agent-shield-tripwire
+    volumes:
+      # Mount application code & configurations read-only for file integrity monitoring
+      - ./gateway:/mnt/gateway:ro
+      - ./java-services:/mnt/java-services:ro
+      - ./portal-frontend/nginx.conf:/mnt/nginx.conf:ro
+      - ./config:/mnt/config:ro
+      - tripwire-data:/var/lib/tripwire
+      - tripwire-keys:/etc/tripwire
+    environment:
+      - SITE_KEY_PASSPHRASE=${TRIPWIRE_SITE_KEY:-AgentShieldSiteKey123!}
+      - LOCAL_KEY_PASSPHRASE=${TRIPWIRE_LOCAL_KEY:-AgentShieldLocalKey123!}
+      - CHECK_INTERVAL_SECONDS=300
+    depends_on:
+      - gateway-python
+      - gateway-java
+
+volumes:
+  redis-data:
+  tripwire-data:
+  tripwire-keys:

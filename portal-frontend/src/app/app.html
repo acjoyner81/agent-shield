@@ -1,0 +1,24 @@
+<div class="portal-shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">A</span><span>AgentShield<small>ENTERPRISE</small></span></div>
+    <div class="workspace-switch"><span class="workspace-avatar">AJ</span><span><small>WORKSPACE</small><strong>{{ auth.tenantName() }}</strong></span><span class="chevron">⌄</span></div>
+    <nav class="main-nav" aria-label="Main navigation">
+      <p class="nav-label">Workspace</p>
+      <a routerLink="/dashboard" routerLinkActive="active"><span class="nav-icon">▦</span>Overview</a>
+      <a routerLink="/logs" routerLinkActive="active"><span class="nav-icon">≋</span>Observability <span class="nav-count">Live</span></a>
+      <a routerLink="/keys" routerLinkActive="active"><span class="nav-icon">⌘</span>API keys & access</a>
+      <p class="nav-label">Platform</p>
+      <a href="javascript:void(0)"><span class="nav-icon">◇</span>Agent runtime</a>
+      <a href="javascript:void(0)"><span class="nav-icon">◌</span>Evaluations</a>
+      <a href="javascript:void(0)"><span class="nav-icon">◒</span>Models & routing</a>
+      <p class="nav-label">Account</p>
+      <a routerLink="/pricing" routerLinkActive="active"><span class="nav-icon">◈</span>Plans & billing</a>
+      <a href="javascript:void(0)"><span class="nav-icon">?</span>Help center</a>
+    </nav>
+    <div class="sidebar-footer"><div class="status-line"><b></b>All systems operational</div><div class="profile"><span class="profile-avatar">AJ</span><span><strong>{{ auth.userName() }}</strong><small>Workspace owner</small></span><span class="more">•••</span></div></div>
+  </aside>
+  <main class="main-content">
+    <header class="topbar"><button class="mobile-menu" type="button">☰</button><div class="breadcrumbs"><span>AgentShield</span><b>/</b><strong>{{ pageTitle | async }}</strong></div><div class="top-actions"><span class="top-status"><b></b> Systems normal</span><button class="top-icon" aria-label="Notifications">♢<i></i></button><button class="top-help">?</button></div></header>
+    <div class="content-wrap"><router-outlet /></div>
+  </main>
+</div>

@@ -66,3 +66,12 @@ crash.log
 *.tmp
 *.swp
 .DS_Store
+
+# Tripwire FIM generated keys and runtime files
+*.twd
+*.twr
+tripwire/tw.cfg
+tripwire/tw.pol
+tripwire/*.key
+tripwire-data/
+tripwire-keys/

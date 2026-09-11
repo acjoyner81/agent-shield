@@ -1,0 +1,23 @@
+{
+  "/api/python": {
+    "target": "http://localhost:8000",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": {
+      "^/api/python": ""
+    }
+  },
+  "/api/java": {
+    "target": "http://localhost:8080",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": {
+      "^/api/java": ""
+    }
+  },
+  "/api": {
+    "target": "http://localhost:8000",
+    "secure": false,
+    "changeOrigin": true
+  }
+}

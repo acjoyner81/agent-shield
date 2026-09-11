@@ -1,0 +1,18 @@
+# Tripwire Policy for AgentShield FIM
+@@section GLOBAL
+TWROOT=/etc/tripwire ;
+TWBIN=/usr/sbin ;
+
+# Attribute flags:
+# +p (perms), +i (inode), +n (links), +u (user), +g (group), +s (size), +m (mtime), +c (ctime), +C (SHA hash)
+SEC_CRIT   = $(IgnoreNone)-SHa ;
+SEC_CONFIG = $(IgnoreNone)-SHa ;
+SEC_APP    = $(IgnoreNone)-SHa ;
+
+@@section FS
+
+# Monitored AgentShield microservices and configurations
+/mnt/gateway        -> $(SEC_APP) (recurse=true) ;
+/mnt/java-services  -> $(SEC_APP) (recurse=true) ;
+/mnt/nginx.conf     -> $(SEC_CONFIG) ;
+/mnt/config         -> $(SEC_CONFIG) (recurse=true) ;

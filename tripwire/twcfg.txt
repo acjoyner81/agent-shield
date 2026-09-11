@@ -1,0 +1,13 @@
+POLFILE=/etc/tripwire/tw.pol
+DBFILE=/var/lib/tripwire/$(HOSTNAME).twd
+REPORTFILE=/var/lib/tripwire/report/$(HOSTNAME)-$(DATE).twr
+SITEKEYFILE=/etc/tripwire/site.key
+LOCALKEYFILE=/etc/tripwire/$(HOSTNAME)-local.key
+EDITOR=/bin/vi
+LATEPROMPTING=false
+LOOSEDIRECTORYCHECKING=false
+MAILNOVIOLATIONS=true
+EMAILREPORTING=false
+MAILMETHOD=SENDMAIL
+SYSLOGREPORTING=true
+REPORTLEVEL=3

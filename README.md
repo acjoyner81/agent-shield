@@ -16,7 +16,7 @@ The project is designed as a learning and product-building system covering:
 
 ## Current Status
 
-This repository is at the initial setup stage. The architecture and configuration contract are documented here before implementation begins.
+The initial service boundaries are scaffolded. Gateway, MCP, agent, evaluation, and observability implementations will be added incrementally behind these boundaries.
 
 ## Planned Repository Layout
 
@@ -25,47 +25,101 @@ agent-shield/
 ├── config/
 │   ├── settings.py
 │   └── guardrails/
-├── gateway-python/
-│   ├── app/
-│   └── tests/
-├── gateway-java/
-│   └── src/
-├── agent-engine/
+├── mcp_servers/
+│   ├── __init__.py
+│   └── tools_server.py
+├── gateway/
+│   ├── main.py
+│   ├── auth.py
+│   └── rate_limiter.py
+├── agent_engine/
 │   ├── graph.py
 │   ├── mcp_client.py
 │   └── state.py
-├── mcp-servers/
-│   ├── python/
-│   └── java/
 ├── evals/
+│   └── judge.py
 ├── observability/
-│   ├── splunk/
-│   └── dynatrace/
-├── infrastructure/
-│   ├── docker/
-│   ├── ansible/
-│   └── terraform/
-├── scripts/
+│   ├── splunk_exporter.py
+│   └── dynatrace_tracer.py
+├── java-services/
+│   ├── gateway-java/
+│   │   ├── pom.xml
+│   │   └── src/main/java/com/agentshield/gateway/
+│   └── mcp-server/
+│       ├── pom.xml
+│       └── src/main/java/com/agentshield/mcp/
+├── portal-frontend/
+│   ├── src/app/core/
+│   ├── src/app/features/
+│   ├── package.json
+│   └── angular.json
 ├── .env.example
+├── requirements.txt
 ├── docker-compose.yml
 └── README.md
 ```
 
-## Architecture Direction
+## Architecture Overview
 
-```text
-Client
-  -> Spring Cloud Gateway or FastAPI edge
-  -> Tenant auth, RBAC, rate limits, budget checks
-  -> Redis cache and usage counters
-  -> LiteLLM/model router
-  -> LangGraph agent runtime
-  -> Governed FastMCP tools and Java microservices
-  -> Guardrails and LLM-as-a-Judge evaluation
-  -> Response, trace, cost event, and audit event
+```mermaid
+flowchart TD
+    subgraph Client ["Client Layer"]
+        UI["Angular Portal Frontend\n(Port 4200)"]
+    end
+
+    subgraph Auth ["Authentication & Identity"]
+        Auth0["Auth0 OIDC Provider\n(JWKS RS256 / Authorize)"]
+    end
+
+    subgraph Edge ["Edge & Reverse Proxy"]
+        Nginx["Nginx Reverse Proxy\n(portal-frontend container)"]
+    end
+
+    subgraph Gateways ["Dual Gateway Layer"]
+        PyGW["FastAPI Gateway (Python)\n(Port 8000 /api/python)"]
+        JavaGW["Spring Cloud Gateway (Java 21)\n(Port 8080 /api/java)"]
+    end
+
+    subgraph Security ["Security & Monitoring"]
+        Tripwire["Tripwire FIM Container\n(Read-Only Volume Monitoring)"]
+    end
+
+    subgraph Core ["Orchestration & State"]
+        Redis[("Redis 7 Cache &\nRate Limiting")]
+        LangGraph["LangChain / LangGraph Engine\n(Agent Runtime & State Graph)"]
+        MCPServers["MCP Servers\n(FastMCP & Java Tools)"]
+    end
+
+    subgraph Observability ["Telemetry & Governance"]
+        LangSmith["LangSmith Tracing"]
+        Splunk["Splunk / Dynatrace"]
+    end
+
+    %% Flows
+    UI -- "1. Login / Redirect" --> Auth0
+    Auth0 -- "2. Return JWT Token" --> UI
+    UI -- "3. Authenticated Requests (Bearer JWT)" --> Nginx
+
+    Nginx -- "/api/python/*" --> PyGW
+    Nginx -- "/api/java/*" --> JavaGW
+
+    PyGW -- "Verify Token (JWKS)" --> Auth0
+    JavaGW -- "Verify Token (JWKS)" --> Auth0
+
+    PyGW -- "Rate Limiting & Token Cache" --> Redis
+    JavaGW -- "State & Cache" --> Redis
+
+    PyGW --> LangGraph
+    LangGraph --> MCPServers
+    LangGraph -- "Prompt & Graph Execution" --> LangSmith
+    PyGW -- "Audit & Telemetry" --> Splunk
+
+    Tripwire -. "Inspect RO Volumes" .-> PyGW
+    Tripwire -. "Inspect RO Volumes" .-> JavaGW
+    Tripwire -. "Inspect RO Volumes" .-> Nginx
 ```
 
-The first implementation should keep provider credentials behind the gateway. Tenants must never receive upstream model keys, and MCP tools must enforce authorization independently of the agent prompt.
+The system ensures provider credentials remain behind the gateway. Tenants never receive upstream model keys, and MCP tools enforce authorization independently of the agent prompt.
 
 ## Local Prerequisites
 
@@ -93,14 +147,37 @@ Once the services are implemented, the expected development workflow will be:
 ```bash
 docker compose up -d redis
 
-# Python gateway and agent services
-python -m uvicorn gateway_python.app.main:app --reload --port 8000
+# Python gateway
+python -m uvicorn gateway.main:app --reload --port 8000
 
-# Java services
-mvn -f gateway-java spring-boot:run
+# Java MCP service
+mvn -f java-services/mcp-server spring-boot:run
+
+# Java edge gateway (port 8080)
+mvn -f java-services/gateway-java spring-boot:run
+
+# Angular control plane (port 4200)
+cd portal-frontend && npm start
 ```
 
 The exact commands may change as each service is added. Keep service-specific commands in their own README files when implementation starts.
+
+## Local Compose Services
+
+After setting `SPLUNK_PASSWORD` in `.env`, start the local stack with:
+
+```bash
+docker compose up --build
+```
+
+The local endpoints are:
+
+- FastAPI gateway: `http://localhost:8000`
+- Java gateway: `http://localhost:8080`
+- Java MCP server: `http://localhost:8081`
+- Splunk Web: `http://localhost:8001`
+- Splunk HEC: `http://localhost:8088`
+- Angular portal: `http://localhost:4200`
 
 ## Initial Delivery Phases
 
