@@ -37,6 +37,7 @@ We use a structured workflow to ensure technical consistency:
 - [x] Implemented `/v1/telemetry/logs` (GET/POST) with Splunk HEC integration
 - [x] Implemented `/v1/billing/checkout` (POST mock)
 - [x] Implemented Granular RBAC Enforcement with Auth0 permissions verification (`require_permission` dependency, Spec 0005)
+- [x] Implemented Tenant Token Bucket Rate Limiting & Isolation (`verify_rate_limit` dependency, Spec 0006)
 - [ ] Implement real billing integration (Stripe)
 - [ ] Implement real telemetry aggregation from Redis $\rightarrow$ Splunk
 - [ ] Build out the Java Gateway core logic
