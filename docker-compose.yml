@@ -37,6 +37,7 @@ services:
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-dev-zymaiayb0afkpn7n.us.auth0.com}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.agentshield.local}
       AUTH0_ISSUER: ${AUTH0_ISSUER:-https://dev-zymaiayb0afkpn7n.us.auth0.com/}
+      DEV_MODE: "true"
     depends_on:
       redis:
         condition: service_healthy
@@ -54,6 +55,7 @@ services:
 
   splunk:
     image: splunk/splunk:latest
+    platform: linux/amd64
     container_name: agentshield-splunk
     environment:
       SPLUNK_START_ARGS: --accept-license

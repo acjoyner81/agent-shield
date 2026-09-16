@@ -10,7 +10,17 @@ import org.springframework.stereotype.Service;
 @Service
 public class SplunkMcpToolService {
 
+    @Tool(description = "Simple echo tool for end-to-end connectivity verification")
+    public Map<String, Object> echoTool(
+            @ToolParam(description = "Text to echo back") String message) {
+        return Map.of(
+                "status", "success",
+                "echo", message,
+                "timestamp", java.time.Instant.now().toString());
+    }
+
     @Tool(description = "High-performance enterprise log query engine for Splunk integration")
+
     public Map<String, Object> querySplunkLogs(
             @ToolParam(description = "SPL search query string") String searchQueryParams,
             @ToolParam(description = "Max event records limit") int limit) {

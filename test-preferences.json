@@ -1,0 +1,6 @@
+{
+  "tool": "pytest",
+  "testDir": "tests",
+  "filePattern": "test_*.py",
+  "packageManager": "pip"
+}

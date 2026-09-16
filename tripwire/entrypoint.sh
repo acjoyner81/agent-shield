@@ -13,7 +13,7 @@ echo "[Tripwire FIM] Initializing Tripwire for host: ${HOSTNAME}"
 mkdir -p /etc/tripwire /var/lib/tripwire /var/lib/tripwire/report
 
 # Generate Site and Local Keys if not present
-if [ ! -f /etc/tripwire/site.key ]; then
+if [ ! -f /etc/tripwire/site.key ] || [ ! -f "/etc/tripwire/${HOSTNAME}-local.key" ]; then
     echo "[Tripwire FIM] Generating site and local encryption keys..."
     twadmin --generate-keys \
         --site-keyfile /etc/tripwire/site.key \
@@ -52,7 +52,20 @@ echo "[Tripwire FIM] Starting continuous monitoring loop (check every ${CHECK_IN
 
 while true; do
     echo "[Tripwire FIM] Running integrity check at $(date -u)..."
-    tripwire --check --interactive false || true
+    
+    # Run the check and capture output/exit code
+    if ! tripwire --check --interactive false; then
+        echo "[Tripwire FIM] ALERT: Integrity violation detected!"
+        
+        # Ship the alert to the Python Gateway
+        curl -s -X POST http://agentshield-python-gateway:8000/v1/telemetry/logs \
+            -H "Content-Type: application/json" \
+            -d "{\"tenant_id\": \"system\", \"level\": \"CRITICAL\", \"message\": \"Tripwire FIM detected a file integrity violation on host ${HOSTNAME}!\"}" \
+            || echo "[Tripwire FIM] Failed to send alert to gateway"
+    else
+        echo "[Tripwire FIM] No violations detected."
+    fi
+
     echo "[Tripwire FIM] Integrity check complete. Sleeping for ${CHECK_INTERVAL_SECONDS}s..."
     sleep "${CHECK_INTERVAL_SECONDS}"
 done

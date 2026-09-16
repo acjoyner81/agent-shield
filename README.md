@@ -170,14 +170,31 @@ After setting `SPLUNK_PASSWORD` in `.env`, start the local stack with:
 docker compose up --build
 ```
 
-The local endpoints are:
+### Service Endpoints
 
-- FastAPI gateway: `http://localhost:8000`
-- Java gateway: `http://localhost:8080`
-- Java MCP server: `http://localhost:8081`
-- Splunk Web: `http://localhost:8001`
-- Splunk HEC: `http://localhost:8088`
-- Angular portal: `http://localhost:4200`
+| Service | URL / Port | Description |
+| :--- | :--- | :--- |
+| **Angular Portal** | [http://localhost:4200](http://localhost:4200) | Main User Interface & Control Plane |
+| **FastAPI Gateway** | [http://localhost:8000](http://localhost:8000) | Python Edge Gateway & API |
+| **Java Gateway** | [http://localhost:8080](http://localhost:8080) | Spring Boot Edge Gateway |
+| **Java MCP Server** | [http://localhost:8081](http://localhost:8081) | Model Context Protocol Server |
+| **Splunk Web** | [http://localhost:8001](http://localhost:8001) | Observability Dashboards |
+| **Splunk HEC** | [http://localhost:8088](http://localhost:8088) | HTTP Event Collector (Telemetry) |
+| **Tripwire** | `N/A` | File Integrity Monitoring (Background Service) |
+| **Redis** | `localhost:6379` | Cache & Rate Limiting Store |
+
+### Common Operations
+
+| Goal | Command |
+| :--- | :--- |
+| **Start everything** (background) | `docker compose up -d` |
+| **Stop everything** | `docker compose down` |
+| **Rebuild and start** | `docker compose up --build` |
+| **View all logs** | `docker compose logs -f` |
+| **Monitor Tripwire logs** | `docker logs -f agent-shield-tripwire` |
+| **Check service status** | `docker compose ps` |
+| **Enter Python Gateway shell** | `docker exec -it agentshield-python-gateway sh` |
+
 
 ## Initial Delivery Phases
 
