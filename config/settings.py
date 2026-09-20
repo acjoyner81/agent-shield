@@ -18,6 +18,21 @@ class Settings(BaseSettings):
     eval_enabled: bool = False
     eval_score_threshold: float = 0.85
 
+    # Stripe Billing & Webhook Configuration
+    stripe_api_key: str = ""
+    stripe_webhook_secret: str = ""
+
+    # Stripe Product Catalog Mapping
+    stripe_product_starter: str = "prod_VHXVVqTBAo3vfR"
+    stripe_product_pro: str = "prod_VHXYKG4I5wq1n6"
+    stripe_product_enterprise: str = "prod_VHYSzpIzdb1CsJ"
+
+    # Tier Rate Limits (RPM)
+    default_free_rpm: int = 60
+    starter_rpm: int = 20
+    pro_rpm: int = 100
+    enterprise_rpm: int = 1000
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 

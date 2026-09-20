@@ -18,6 +18,7 @@ from config.settings import settings
 from gateway.auth import verify_jwt, get_verified_tenant, require_permission
 from gateway.rate_limit import verify_rate_limit
 from gateway.telemetry import log_telemetry
+from gateway.webhooks import router as webhook_router
 
 
 app = FastAPI(
@@ -25,6 +26,8 @@ app = FastAPI(
     version="1.0.0",
     dependencies=[Depends(verify_rate_limit)],
 )
+
+app.include_router(webhook_router, tags=["webhooks"])
 r = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 API_KEY_NAME = "X-Tenant-API-Key"

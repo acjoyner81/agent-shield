@@ -11,7 +11,12 @@ from fastapi import HTTPException, Request, Response, status
 from config.settings import settings
 from gateway.telemetry import log_telemetry
 
-DEFAULT_TENANT_RPM = 60
+DEFAULT_TENANT_RPM = 60# Mappings for Stripe subscription tiers stored in Redis
+TIER_LIMIT_MAP = {
+    "starter": getattr(settings, "starter_rpm", 20),
+    "pro": getattr(settings, "pro_rpm", 100),
+    "enterprise": getattr(settings, "enterprise_rpm", 1000),
+}
 
 r = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
@@ -112,50 +117,53 @@ def extract_tenant_id(request: Request) -> Optional[str]:
 
 
 async def verify_rate_limit(request: Request, response: Response) -> Optional[str]:
-    """
-    FastAPI dependency for perimeter token bucket rate limiting on /v1/* endpoints.
-    Enforces tenant token bucket, sets rate limit response headers,
-    emits telemetry on rate limit exhaustion, and returns HTTP 429 when limits are exceeded.
-    """
     path = request.url.path
 
-    # AC-5: Public/unauthenticated endpoints bypass rate limit evaluation entirely
     if (
         not (path.startswith("/v1") or path.startswith("/api/v1"))
-        or path in ("/health", "/metrics", "/docs", "/openapi.json", "/redoc")
+        or path in ("/health", "/metrics", "/docs", "/openapi.json", "/redoc", "/v1/webhooks/stripe")
     ):
         return None
 
     tenant_id = extract_tenant_id(request)
     if not tenant_id:
-        # If tenant ID cannot be determined yet, skip rate limit and defer to auth handler
         return None
 
-    from gateway.main import TENANT_CONFIG
-
-    tenant_info = next(
-        (v for k, v in TENANT_CONFIG.items() if v.get("tenant_id") == tenant_id),
-        None,
-    )
-    capacity = (
-        int(tenant_info["rate_limit_rpm"])
-        if tenant_info and "rate_limit_rpm" in tenant_info
-        else DEFAULT_TENANT_RPM
-    )
-
     r_client = get_redis_client()
+
+    # 1. Primary: Dynamic lookup from Redis (set by Stripe webhooks)
+    capacity = None
+    try:
+        tier = r_client.get(f"tenant:{tenant_id}:tier")
+        if tier and tier in TIER_LIMIT_MAP:
+            capacity = TIER_LIMIT_MAP[tier]
+    except Exception:
+        pass
+
+    # 2. Fallback: Local TENANT_CONFIG
+    if capacity is None:
+        from gateway.main import TENANT_CONFIG
+        tenant_info = next(
+            (v for k, v in TENANT_CONFIG.items() if v.get("tenant_id") == tenant_id),
+            None,
+        )
+        if tenant_info and "rate_limit_rpm" in tenant_info:
+            capacity = int(tenant_info["rate_limit_rpm"])
+
+    # 3. Final Fallback: Default free tier setting or constant
+    if capacity is None:
+        capacity = getattr(settings, "default_free_rpm", DEFAULT_TENANT_RPM)
+
     allowed, remaining, limit, reset, retry_after = check_token_bucket(
         r_client, tenant_id, capacity=capacity
     )
 
     if allowed:
-        # AC-2: Set rate limit headers
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
         response.headers["X-RateLimit-Reset"] = str(reset)
         return tenant_id
     else:
-        # AC-4: Structured telemetry warning on limit exhaustion
         trace_id = "unknown"
         traceparent = request.headers.get("traceparent")
         if traceparent and "-" in traceparent:
@@ -166,14 +174,13 @@ async def verify_rate_limit(request: Request, response: Response) -> Optional[st
         asyncio.create_task(
             log_telemetry(
                 tenant_id=tenant_id,
-                message=f"event=\"rate_limit_exceeded\" Rate limit exceeded for tenant {tenant_id} (user {user_id}) on endpoint {path}",
+                message=f'event="rate_limit_exceeded" Rate limit exceeded for tenant {tenant_id} (user {user_id}) on endpoint {path}',
                 trace_id=trace_id,
                 level="WARN",
                 category="RATE_LIMIT_EXCEEDED",
             )
         )
 
-        # AC-3: HTTP 429 response with Retry-After header
         headers = {
             "Retry-After": str(retry_after),
             "X-RateLimit-Limit": str(limit),

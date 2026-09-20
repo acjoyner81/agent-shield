@@ -114,3 +114,22 @@ def test_rate_limit_exhausted_returns_429():
         args, kwargs = mock_telemetry.call_args
         assert kwargs.get("level") == "WARN" or (args and args[3] == "WARN")
         assert kwargs.get("category") == "RATE_LIMIT_EXCEEDED"
+
+def test_rate_limit_uses_stripe_redis_tier():
+    """Verify rate limit capacity resolves from Redis tier setting set by Stripe webhooks."""
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = "starter"  # Starter tier = 20 RPM
+    
+    with patch("gateway.rate_limit.get_redis_client", return_value=mock_redis), \
+         patch("gateway.rate_limit.check_token_bucket", return_value=(True, 19, 20, 3, 0)) as mock_check:
+        
+        response = client.get(
+            "/api/v1/protected",
+            headers={
+                "Authorization": "Bearer dev-mock-token",
+                "DEV_MODE": "true",
+            },
+        )
+        assert response.headers.get("X-RateLimit-Limit") == "20"
+        mock_check.assert_called_once()
+        assert mock_check.call_args[1]["capacity"] == 20

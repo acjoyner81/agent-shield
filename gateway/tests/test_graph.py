@@ -1,6 +1,7 @@
 import pytest
 from langchain_core.messages import HumanMessage
-from agent_engine.graph import build_agent_graph
+from agent_engine.graph import run_agent, build_agent_graph
+from agent_engine.graph import AgentState
 
 @pytest.fixture
 def compiled_graph():
@@ -39,3 +40,9 @@ async def test_agent_graph_splunk_tool_routing(compiled_graph):
     assert final_state["next_step"] == "end"
     assert "MCP Splunk Tool Output" in final_state["messages"][-1].content
     assert final_state["tool_output"] != ""
+
+@pytest.mark.asyncio
+async def test_run_agent_returns_state():
+    initial_state = {"messages": []}
+    result = await run_agent(initial_state)
+    assert result == initial_state

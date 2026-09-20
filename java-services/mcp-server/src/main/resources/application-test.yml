@@ -1,0 +1,10 @@
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: fastapi-chat-route
+          uri: http://localhost:${wiremock.server.port}
+          predicates:
+            - Path=/v1/chat/completions
+          filters:
+            - StripPrefix=2

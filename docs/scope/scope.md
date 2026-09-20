@@ -17,7 +17,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 3 | End to End Flow | Slice 1 | planned |
 | 4 | Auth0 Integration | Slice 2 | planned |
 | 5 | RBAC Enforcement | Slice 2 | planned |
-| 6 | Hybrid Stripe Integration | Slice 3 | planned |
+| 6 | Hybrid Stripe Integration | Slice 3 | in-progress |
 | 7 | Tenant Rate Limiting | Slice 3 | done |
 | 8 | Usage Metering | Slice 3 | planned |
 | 9 | Admin Dashboard | Slice 4 | planned |
@@ -93,12 +93,17 @@ Spec 0005 · code in `gateway/main.py`
 
 ## Slice 3: Billing & Monetization
 
-### 6. Hybrid Stripe Integration · needs a decision · GA
+### 6. Hybrid Stripe Integration · in-progress · GA
 Implement a base monthly subscription combined with metered billing for tokens and tool calls.
 **Done when:** Stripe successfully charges the base fee and tracks metered usage for a tenant.
-- [ ] Design it (spec): `/architect hybrid stripe integration`
-
-### 7. Tenant Rate Limiting & Isolation · done
+- [x] Design it (spec): `/architect hybrid stripe integration`
+- [ ] Build it: `/develop hybrid stripe integration`
+   - [ ] Configuration & entitlement helper module
+   - [ ] Implement /v1/billing/checkout & /v1/billing/portal endpoints
+   - [ ] Implement /v1/billing/webhook endpoint with signature verification
+- [ ] Verify it: `/check verify hybrid stripe integration`
+- [ ] Test it: `/test hybrid stripe integration`
+Spec 0007 · `docs/specs/0007-stripe-integration.md`
 Enforce token bucket rate limits in Redis across all `/v1/*` routes per tenant.
 **Done when:** requests exceeding tenant capacity return HTTP 429 with Retry-After header and trigger telemetry logs.
 - [x] Design it (spec): `/architect tenant rate limiting`
