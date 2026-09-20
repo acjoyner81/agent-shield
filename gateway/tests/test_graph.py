@@ -43,6 +43,6 @@ async def test_agent_graph_splunk_tool_routing(compiled_graph):
 
 @pytest.mark.asyncio
 async def test_run_agent_returns_state():
-    initial_state = {"messages": []}
+    initial_state = {"messages": [], "tenant_id": "", "next_step": "", "tool_output": ""}
     result = await run_agent(initial_state)
-    assert result == initial_state
+    assert result["next_step"] == "end"

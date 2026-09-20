@@ -1,12 +1,11 @@
-"""Shared LangGraph state definitions."""
+"""Agent state definition."""
 
-from typing import TypedDict
+from typing import TypedDict, Annotated, List
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
-
-class AgentState(TypedDict, total=False):
+class AgentState(TypedDict):
+    messages: Annotated[List[BaseMessage], add_messages]
     tenant_id: str
-    request_id: str
-    prompt: str
-    response: str
-    tool_output: dict[str, object]
     next_step: str
+    tool_output: str
