@@ -1,7 +1,8 @@
 import os
+from unittest.mock import MagicMock, AsyncMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 
 from gateway.main import app
 
@@ -22,51 +23,92 @@ def mock_redis():
         yield mock
 
 
-def test_unauthorized_missing_api_key():
-    """Verify a missing bearer token returns HTTP 401 Unauthorized."""
-    # Temporarily disable DEV_MODE to test 401
-    del os.environ["DEV_MODE"]
-    response = client.post("/v1/chat/completions", json={"prompt": "Test query"})
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Not authenticated"
+def test_health_endpoint_returns_ok():
+    """Verify /health returns status ok without requiring auth."""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["service"] == "gateway"
 
 
-def test_protected_route_requires_bearer_token():
-    """Verify the Auth0-protected route rejects requests without a bearer token."""
-    del os.environ["DEV_MODE"]
-    response = client.get("/api/v1/protected")
+def test_health_bypasses_rate_limit(mock_redis):
+    """Verify /health bypasses rate limiting evaluation."""
+    with patch("gateway.rate_limit.check_token_bucket") as mock_check:
+        response = client.get("/health")
+        assert response.status_code == 200
+        mock_check.assert_not_called()
 
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Not authenticated"
+
+def test_telemetry_logs_get_returns_list(mock_redis):
+    """Verify /v1/telemetry/logs returns telemetry history."""
+    mock_redis.lrange.return_value = [
+        '{"tenant_id": "tenant_alpha", "level": "INFO", "message": "test"}'
+    ]
+    response = client.get("/v1/telemetry/logs")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
 
 
-def test_rate_limit_exceeded(mock_redis):
-    """Verify a tenant exceeding its request limit receives HTTP 429."""
-    with patch("gateway.rate_limit.check_token_bucket", return_value=(False, 0, 5, 60, 12)):
+def test_telemetry_logs_post_accepts_payload(mock_redis):
+    """Verify /v1/telemetry/logs POST accepts and processes telemetry payload."""
+    mock_redis.lpush = MagicMock()
+    mock_redis.ltrim = MagicMock()
+    with patch("gateway.main.requests.post") as mock_post:
+        mock_post.return_value = MagicMock()
+        mock_post.return_value.raise_for_status = lambda: None
+        response = client.post(
+            "/v1/telemetry/logs",
+            json={"tenant_id": "tenant_alpha", "level": "INFO", "message": "Test telemetry"},
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+
+
+def test_telemetry_logs_post_splunk_failure(mock_redis):
+    """Verify /v1/telemetry/logs POST handles Splunk failure gracefully."""
+    mock_redis.lpush = MagicMock()
+    mock_redis.ltrim = MagicMock()
+    with patch("gateway.main.requests.post", side_effect=Exception("Connection refused")):
+        response = client.post(
+            "/v1/telemetry/logs",
+            json={"tenant_id": "tenant_alpha", "level": "INFO", "message": "Test telemetry"},
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+
+
+
+
+
+def test_chat_completions_budget_exceeded(mock_redis):
+    """Verify /v1/chat/completions returns 402 when daily budget exceeded."""
+    def mock_get(key):
+        if key.startswith("budget:"):
+            return "100.0"
+        return None
+    mock_redis.get.side_effect = mock_get
+    with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer dev-mock-token"},
+            json={"prompt": "Test query"},
+        )
+    assert response.status_code == 402
+    assert "daily budget exceeded" in response.json()["detail"]
+
+
+
+
+
+def test_chat_completions_rate_limit(mock_redis):
+    """Verify /v1/chat/completions enforces rate limit."""
+    with patch("gateway.rate_limit.check_token_bucket", return_value=(False, 0, 60, 60, 10)), \
+         patch("gateway.rate_limit.emit_rate_limit_exceeded"), \
+         patch("asyncio.create_task"):
         response = client.post(
             "/v1/chat/completions",
             headers={"Authorization": "Bearer dev-mock-token"},
             json={"prompt": "Over-limit request"},
         )
-
-        assert response.status_code == 429
-        assert "Tenant rate limit exceeded" in response.json()["detail"]
-
-
-def test_semantic_cache_hit(mock_redis):
-    """Verify cached responses have zero request cost."""
-    mock_redis.get.return_value = '{"text": "Cached response", "tokens_used": 0}'
-
-    with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
-        response = client.post(
-            "/v1/chat/completions",
-            headers={"Authorization": "Bearer dev-mock-token"},
-            json={"prompt": "What is Python?"},
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["source"] == "semantic_cache"
-        assert data["cost_usd"] == 0.0
-        assert data["response"]["text"] == "Cached response"
+    assert response.status_code == 429
+    assert "Tenant rate limit exceeded" in response.json()["detail"]

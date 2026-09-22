@@ -9,7 +9,7 @@ import redis
 from fastapi import HTTPException, Request, Response, status
 
 from config.settings import settings
-from gateway.telemetry import log_telemetry
+from gateway.telemetry import emit_rate_limit_exceeded
 
 DEFAULT_TENANT_RPM = 60# Mappings for Stripe subscription tiers stored in Redis
 TIER_LIMIT_MAP = {
@@ -172,12 +172,12 @@ async def verify_rate_limit(request: Request, response: Response) -> Optional[st
         user_id = getattr(request.state, "user_id", "unknown")
 
         asyncio.create_task(
-            log_telemetry(
+            emit_rate_limit_exceeded(
                 tenant_id=tenant_id,
-                message=f'event="rate_limit_exceeded" Rate limit exceeded for tenant {tenant_id} (user {user_id}) on endpoint {path}',
+                user_id=user_id,
                 trace_id=trace_id,
-                level="WARN",
-                category="RATE_LIMIT_EXCEEDED",
+                span_id=trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown",
+                rate_limit_remaining=0,
             )
         )
 

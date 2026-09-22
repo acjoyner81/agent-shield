@@ -9,7 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from typing import Annotated
 
 from config.settings import settings
-from gateway.telemetry import log_telemetry
+from gateway.telemetry import emit_authz_failure
 
 bearer_scheme = HTTPBearer()
 
@@ -98,15 +98,16 @@ def require_permission(required_scope: str):
                 trace_id = traceparent.split("-")[1]
                 
             user_id = getattr(request.state, "user_id", "unknown")
+            span_id = trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown"
             
-            import asyncio
-            asyncio.create_task(log_telemetry(
-                tenant_id=tenant_id, 
-                message=f"Authorization failure for user {user_id}: missing {required_scope}", 
-                trace_id=trace_id, 
-                level="WARN", 
-                category="AUTHZ_FAILURE"
-            ))
+            # Synchronous direct call (removed asyncio.create_task and removed duplicate call)
+            emit_authz_failure(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                span_id=span_id,
+                missing_scope=required_scope,
+            )
             
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

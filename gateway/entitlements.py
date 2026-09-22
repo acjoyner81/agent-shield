@@ -2,6 +2,7 @@ import json
 from typing import Dict, Any
 import redis
 from config.settings import settings
+from gateway.telemetry import emit_billing_subscription_changed
 
 redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 ENTITLEMENT_TTL_SECONDS = 86400
@@ -42,8 +43,28 @@ def set_tenant_entitlements(tenant_id: str, tier: str, status: str) -> Dict[str,
     }
     
     redis_client.setex(key, ENTITLEMENT_TTL_SECONDS, json.dumps(payload))
+    emit_billing_subscription_changed(
+        tenant_id=tenant_id,
+        user_id=tenant_id,
+        trace_id=tenant_id,
+        span_id="unknown",
+        action=status,
+        stripe_customer_id=None,
+        tier=effective_tier,
+        status=status,
+    )
     return payload
 
 def clear_tenant_entitlements(tenant_id: str) -> None:
     key = f"tenant:{tenant_id}:entitlements"
     redis_client.delete(key)
+    emit_billing_subscription_changed(
+        tenant_id=tenant_id,
+        user_id=tenant_id,
+        trace_id=tenant_id,
+        span_id="unknown",
+        action="deleted",
+        stripe_customer_id=None,
+        tier="free",
+        status="canceled",
+    )

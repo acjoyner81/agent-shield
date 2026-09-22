@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     # Stripe Billing & Webhook Configuration
     stripe_api_key: str = ""
     stripe_webhook_secret: str = ""
+    stripe_success_url: str = "http://localhost:4200/billing/success"
+    stripe_cancel_url: str = "http://localhost:4200/billing/cancel"
 
     # Stripe Product Catalog Mapping
     stripe_product_starter: str = "prod_VHXVVqTBAo3vfR"

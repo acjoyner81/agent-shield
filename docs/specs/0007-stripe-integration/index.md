@@ -1,17 +1,11 @@
 # 0007. Hybrid Stripe Integration
 
 **Date**: 2026-09-16
-**Status**: Proposed
+**Status**: In Progress
 
 ## Summary
 
 Implement a hybrid monetization model combining base monthly subscriptions with metered billing for token and tool call usage using Stripe. Active tenant entitlements and billing status are cached in Redis to validate requests locally while Stripe webhooks synchronize subscription state asynchronously.
-
-## Context
-
-AgentShield requires a monetization engine that supports base monthly subscription tiers alongside metered usage for high-volume LLM requests and tool executions. Tenants must be checked for active subscription status and feature entitlements at the API gateway perimeter without incurring real-time network latency from direct Stripe API calls during execution.
-
-We need a flexible integration that handles checkout sessions, customer portal redirection, webhook event processing, and Redis entitlement caching.
 
 ## Requirements
 
@@ -26,30 +20,6 @@ We need a flexible integration that handles checkout sessions, customer portal r
 - **AC-4**: Expose `/v1/billing/portal` POST endpoint to create Stripe Customer Portal sessions for self-service subscription management.
 - **AC-5**: Implement `/v1/billing/webhook` POST endpoint with signature verification (`stripe.Webhook.construct_event`) to handle `customer.subscription.created`, `updated`, and `deleted` events, updating Redis entitlements instantly.
 
-## Options considered
-
-### Option 1: Hybrid Base + Metered Billing with Redis Entitlement Caching (Recommended)
-
-Combine Stripe Checkout/Portal for base plan management with Redis entitlement caching and webhook synchronization.
-
-**Pros**:
-- Zero network latency overhead during API gateway request execution due to local Redis cache lookups.
-- Asynchronous webhook processing keeps subscription state synchronized reliably.
-- Supports both fixed base monthly recurring fees and variable usage billing.
-
-**Cons**:
-- Requires webhook handler security hardening and idempotency checks.
-
-### Option 2: Direct Synchronous Stripe API Verification
-
-Call Stripe API synchronously on every billing or entitlement check.
-
-**Pros**:
-- Always guarantees real-time accuracy without caching layer complexity.
-
-**Cons**:
-- Adds 100-300ms latency to gateway requests and exposes system to Stripe API rate limits.
-
 ## Decision
 
 **Chosen option**: Option 1: Hybrid Base + Metered Billing with Redis Entitlement Caching
@@ -57,10 +27,6 @@ Call Stripe API synchronously on every billing or entitlement check.
 Implement Stripe SDK integration in FastAPI with Redis entitlement caching, checkout/portal endpoints, and signed webhook event processing.
 
 **Implementation skills**: `fastapi` (`tiangolo/fastapi`, `pip install fastapi`) · `redis` (`redis/redis-py`, `pip install redis`) · `stripe` (`stripe/stripe-python`, `pip install stripe`)
-
-## Rationale
-
-Redis entitlement caching ensures that gateway performance and low latency are preserved for LLM requests. Webhook synchronization ensures tenant subscription state updates take effect immediately when events occur in Stripe.
 
 ## Feature design
 
@@ -102,12 +68,12 @@ Strict signature validation on webhooks protects against forgery. Stripe custome
 
 ## Build plan
 
-1. Add `stripe>=8.0.0` dependency to `requirements.txt` and update `config/settings.py` with Stripe configurations, satisfies **AC-1**
-2. Implement entitlement caching helper functions in `gateway/billing.py`, satisfies **AC-2**
-3. Implement `/v1/billing/checkout` and `/v1/billing/portal` endpoints in `gateway/billing.py`, satisfies **AC-3**, **AC-4**
-4. Implement `/v1/billing/webhook` with signature verification and event handling in `gateway/billing.py`, satisfies **AC-5**
-5. Register billing router into main FastAPI app in `gateway/main.py`, satisfies **AC-3**, **AC-4**, **AC-5**
-6. Add unit tests in `gateway/tests/test_billing.py`, satisfies **AC-1**, **AC-2**, **AC-3**, **AC-4**, **AC-5**
+1. Add `stripe>=8.0.0` dependency to `requirements.txt` and update `config/settings.py` with Stripe configurations, satisfies **AC-1** ✅
+2. Implement entitlement caching helper functions in `gateway/billing.py`, satisfies **AC-2** ✅
+3. Implement `/v1/billing/checkout` and `/v1/billing/portal` endpoints in `gateway/billing.py`, satisfies **AC-3**, **AC-4** ✅
+4. Implement `/v1/billing/webhook` with signature verification and event handling in `gateway/billing.py`, satisfies **AC-5** ✅
+5. Register billing router into main FastAPI app in `gateway/main.py`, satisfies **AC-3**, **AC-4**, **AC-5** ✅
+6. Add unit tests in `gateway/tests/test_billing.py`, satisfies **AC-1**, **AC-2**, **AC-3**, **AC-4**, **AC-5** ✅
 
 ## Consequences
 

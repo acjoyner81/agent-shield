@@ -28,10 +28,12 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 ### A. Existing Stack · existing
 Docker, Redis, Splunk, and Python Gateway scaffold. code in `./`
 
-### 1. Telemetry Standard · needs a decision
+### 1. Telemetry Standard · done · GA
 Define the JSON log schema and trace ID propagation to ensure observability across all services.
 **Done when:** a standardized log format is recorded in a spec and implemented in the gateway and MCP server.
-- [ ] Design it (spec): `/architect telemetry standard`
+- [x] Design it (spec): `/architect telemetry standard`
+- [x] Define event schema: `/architect event schema` → Spec 0008
+- Spec 0008 · `docs/specs/0008-event-schema.md` · standard for all services
 
 ## Slice 1: The Telemetry Loop
 
@@ -97,13 +99,13 @@ Spec 0005 · code in `gateway/main.py`
 Implement a base monthly subscription combined with metered billing for tokens and tool calls.
 **Done when:** Stripe successfully charges the base fee and tracks metered usage for a tenant.
 - [x] Design it (spec): `/architect hybrid stripe integration`
-- [ ] Build it: `/develop hybrid stripe integration`
-   - [ ] Configuration & entitlement helper module
-   - [ ] Implement /v1/billing/checkout & /v1/billing/portal endpoints
-   - [ ] Implement /v1/billing/webhook endpoint with signature verification
-- [ ] Verify it: `/check verify hybrid stripe integration`
+- [x] Build it: `/develop hybrid stripe integration`
+   - [x] Configuration & entitlement helper module
+   - [x] Implement /v1/billing/checkout & /v1/billing/portal endpoints
+   - [x] Implement /v1/billing/webhook endpoint with signature verification
+- [x] Verify it: `/check verify hybrid stripe integration`
 - [ ] Test it: `/test hybrid stripe integration`
-Spec 0007 · `docs/specs/0007-stripe-integration.md`
+Spec 0007 · `docs/specs/0007-stripe-integration/index.md` · code in `gateway/billing.py`
 Enforce token bucket rate limits in Redis across all `/v1/*` routes per tenant.
 **Done when:** requests exceeding tenant capacity return HTTP 429 with Retry-After header and trigger telemetry logs.
 - [x] Design it (spec): `/architect tenant rate limiting`

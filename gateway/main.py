@@ -17,8 +17,9 @@ from pydantic import BaseModel
 from config.settings import settings
 from gateway.auth import verify_jwt, get_verified_tenant, require_permission
 from gateway.rate_limit import verify_rate_limit
-from gateway.telemetry import log_telemetry
+from gateway.telemetry import emit_request_completed, emit_authz_failure
 from gateway.webhooks import router as webhook_router
+from gateway.billing import router as billing_router
 
 
 app = FastAPI(
@@ -28,6 +29,7 @@ app = FastAPI(
 )
 
 app.include_router(webhook_router, tags=["webhooks"])
+app.include_router(billing_router)
 r = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 API_KEY_NAME = "X-Tenant-API-Key"
@@ -79,6 +81,8 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "service": "gateway"}
 
 
+# gateway/main.py
+
 @app.post("/v1/tools/execute", dependencies=[Depends(require_permission("tools:execute"))])
 async def execute_tool(
     payload: ToolRequest,
@@ -88,46 +92,68 @@ async def execute_tool(
 ) -> dict[str, object]:
     trace_id = traceparent.split("-")[1] if "-" in traceparent else "unknown"
     user_id = getattr(request.state, "user_id", "unknown")
-    
-    await log_telemetry(tenant_id, f"Executing tool {payload.tool_name} for user {user_id}", trace_id, category="MCP_ROUTE")
-    
-    # Forward to MCP Server (JSON-RPC)
-    mcp_url = "http://mcp-server:8081/rpc" # Inferred from AGENTS.md
+
+    mcp_url = "http://mcp-server:8081/rpc"
     rpc_payload = {
         "jsonrpc": "2.0",
         "method": "tools/call",
         "params": {"name": payload.tool_name, "arguments": payload.params},
-        "id": 1
+        "id": 1,
     }
-    
+
     try:
         async with httpx.AsyncClient() as client:
-            print(f"DEBUG: Calling MCP server at {mcp_url} with payload {rpc_payload}")
             response = await client.post(
-                mcp_url, 
-                json=rpc_payload, 
+                mcp_url,
+                json=rpc_payload,
                 headers={"traceparent": traceparent, "X-Tenant-ID": tenant_id},
-                timeout=10.0
+                timeout=10.0,
             )
-            print(f"DEBUG: MCP response status: {response.status_code}")
             response.raise_for_status()
             result = response.json()
-            
-            await log_telemetry(tenant_id, f"Tool {payload.tool_name} returned result", trace_id, category="MCP_ROUTE")
+
+            # Synchronous call (removed 'await')
+            emit_request_completed(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                span_id=trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown",
+                method="POST",
+                path="/v1/tools/execute",
+                status_code=200,
+                latency_ms=0,
+            )
             return {
                 "status": "success",
                 "result": result.get("result"),
-                "trace_id": trace_id
+                "trace_id": trace_id,
             }
     except httpx.ConnectError as ce:
-        await log_telemetry(tenant_id, f"MCP Connection Error: {str(ce)}", trace_id, level="ERROR", category="MCP_ROUTE")
-        print(f"DEBUG: Connection Error: {ce}")
+        # Synchronous call (removed 'await')
+        emit_request_completed(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            trace_id=trace_id,
+            span_id=trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown",
+            method="POST",
+            path="/v1/tools/execute",
+            status_code=502,
+            latency_ms=0,
+        )
         raise HTTPException(status_code=502, detail=f"MCP Connection Failed: {str(ce)}")
     except Exception as e:
-        await log_telemetry(tenant_id, f"MCP Execution failed: {str(e)}", trace_id, level="ERROR", category="MCP_ROUTE")
-        print(f"DEBUG: General Error: {e}")
-        raise HTTPException(status_code=502, detail=f"MCP Server Error: {str(e)}")
-
+        # Synchronous call (removed 'await')
+        emit_request_completed(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            trace_id=trace_id,
+            span_id=trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown",
+            method="POST",
+            path="/v1/tools/execute",
+            status_code=502,
+            latency_ms=0,
+        )
+        raise e
 
 @app.get("/v1/telemetry/logs")
 async def get_telemetry_logs() -> list[dict[str, object]]:
@@ -162,16 +188,6 @@ async def post_telemetry_logs(payload: TelemetryPayload) -> dict[str, str]:
     r.ltrim("telemetry_history", 0, 99) # Keep last 100
     
     return {"status": "accepted"}
-
-
-@app.post("/v1/billing/checkout")
-async def billing_checkout(payload: dict = None) -> dict[str, object]:
-    # Mock checkout contract to clear 404s on the portal
-    return {
-        "status": "success",
-        "checkout_url": "https://checkout.stripe.com/mock_session_123",
-        "message": "Checkout session created successfully"
-    }
 
 
 @app.get("/api/v1/protected")

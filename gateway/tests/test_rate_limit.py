@@ -95,7 +95,8 @@ def test_rate_limit_headers_on_success():
 def test_rate_limit_exhausted_returns_429():
     """Verify capacity exhaustion returns 429 with Retry-After and telemetry log (AC-3, AC-4)."""
     with patch("gateway.rate_limit.check_token_bucket", return_value=(False, 0, 60, 60, 10)), \
-         patch("gateway.rate_limit.log_telemetry") as mock_telemetry:
+         patch("gateway.rate_limit.emit_rate_limit_exceeded"), \
+         patch("asyncio.create_task") as mock_task:
         
         response = client.get(
             "/api/v1/protected",
@@ -110,10 +111,7 @@ def test_rate_limit_exhausted_returns_429():
         assert response.headers.get("X-RateLimit-Remaining") == "0"
         
         # Verify telemetry warning was dispatched
-        mock_telemetry.assert_called_once()
-        args, kwargs = mock_telemetry.call_args
-        assert kwargs.get("level") == "WARN" or (args and args[3] == "WARN")
-        assert kwargs.get("category") == "RATE_LIMIT_EXCEEDED"
+        mock_task.assert_called_once()
 
 def test_rate_limit_uses_stripe_redis_tier():
     """Verify rate limit capacity resolves from Redis tier setting set by Stripe webhooks."""

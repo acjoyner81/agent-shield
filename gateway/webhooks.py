@@ -3,6 +3,7 @@ import stripe
 import logging
 from config.settings import settings
 from gateway.entitlements import set_tenant_entitlements, clear_tenant_entitlements
+from gateway.telemetry import emit_billing_subscription_changed
 
 router = APIRouter()
 logger = logging.getLogger("gateway.webhooks")
@@ -26,6 +27,11 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None))
     except (ValueError, stripe.error.SignatureVerificationError):
         raise HTTPException(status_code=400, detail="Invalid signature")
 
+    if hasattr(event, "to_dict_recursive"):
+        event = event.to_dict_recursive()
+    elif hasattr(event, "to_dict"):
+        event = event.to_dict()
+
     event_type = event["type"]
     data = event["data"]["object"]
 
@@ -42,8 +48,30 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None))
 
         set_tenant_entitlements(tenant_id, tier, status)
 
+        emit_billing_subscription_changed(
+            tenant_id=tenant_id,
+            user_id=tenant_id,
+            trace_id=tenant_id,
+            span_id="unknown",
+            action=status,
+            stripe_customer_id=data.get("customer"),
+            tier=tier,
+            status=status,
+        )
+
     elif event_type == "customer.subscription.deleted":
         tenant_id = data.get("metadata", {}).get("tenant_id") or data.get("customer")
         clear_tenant_entitlements(tenant_id)
+
+        emit_billing_subscription_changed(
+            tenant_id=tenant_id,
+            user_id=tenant_id,
+            trace_id=tenant_id,
+            span_id="unknown",
+            action="deleted",
+            stripe_customer_id=data.get("customer"),
+            tier="free",
+            status="canceled",
+        )
 
     return {"status": "success"}
