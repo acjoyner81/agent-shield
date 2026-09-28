@@ -145,7 +145,7 @@ Create Angular components for the portal to display daily token consumption and 
    - [x] Add `/v1/health/services` with a probe per service
    - [x] Wire the dashboard cards to live values on a 60s poll
    - [x] Cover cost, role gate, tenant scope, and probes with tests
-- [ ] Verify it: `/check verify admin dashboard`
+- [ ] Verify it: `/check verify admin dashboard` — run 2026-09-28, verdict BLOCKED. All backend criteria (AC-1, AC-2, AC-3, AC-4, AC-6) proven live; the seven UI steps need an Auth0 login, since `/dashboard` is behind the stock `authGuardFn` with no dev bypass. Two findings recorded in `verify.md`.
 - [ ] Test it: `/test admin dashboard`
 Spec 0011 · `docs/specs/0011-admin-dashboard/index.md` · code in `gateway/pricing.py`, `gateway/metering.py`, `gateway/main.py`, `portal-frontend/src/app/features/dashboard/`
 

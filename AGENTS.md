@@ -49,6 +49,8 @@ We use a structured workflow to ensure technical consistency:
 
 ## Operational Notes
 - `gateway-python` bakes its image at build time and has no source volume, so a running container can be many changes behind. Run `docker compose up -d --build gateway-python` before verifying anything against port 8000, or you will be testing stale code.
+- A Homebrew `redis-server` already holds `127.0.0.1:6379`, so the local `.env` value `redis://localhost:6379` points at a different Redis than the containers use (`redis://redis:6379`). Seeding or inspecting usage from the host silently touches the wrong store and every reading looks empty. Drive the metering functions from inside `gateway-python` instead.
+- The portal dashboard sits behind the stock Auth0 `authGuardFn` with no dev bypass, so driving the UI in a browser needs a real Auth0 account in `dev-zymaiayb0afkpn7n`. The API it calls is reachable without a browser.
 
 ## Project Memory
 For quick recall of recent changes, refer to the git history or the `docs/progress.md` (if created).
