@@ -101,7 +101,7 @@ Ordered as thin vertical slices per the project default (Tracer Bullet), getting
 4. [x] Document the Bearer wins precedence and the spoofed header rule in the schema security description, matching `resolve_active_tenant`, satisfies **AC-2**, **AC-3**
 5. [x] Add `gateway/tests/test_public_api_schema.py` that asserts route inclusion, scheme registration, precedence text, the spoof rule text, and the absence of secret shaped examples, satisfies **AC-1** through **AC-5**
 6. [x] Add `gateway/tests/test_public_api_machine_access.py` proving a key reaches all four contract routes, that a spoofed `X-Tenant-ID` is ignored, that Bearer beats a key, and that scopes and key lifecycle still apply, satisfies **AC-2**, **AC-3**, **AC-4**
-7. [ ] Add a developer quick start to the portal (a short `/developers` note or the keys screen helper) linking to `/docs` with a curl example, optional smoke polish for the feature, satisfies **AC-1**
+7. [x] Add a developer quick start to the portal (a short `/developers` note or the keys screen helper) linking to `/docs` with a curl example, optional smoke polish for the feature, satisfies **AC-1**
 
 ## Consequences
 

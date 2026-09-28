@@ -39,10 +39,16 @@ We use a structured workflow to ensure technical consistency:
 - [x] Implemented Granular RBAC Enforcement with Auth0 permissions verification (`require_permission` dependency, Spec 0005)
 - [x] Implemented Tenant Token Bucket Rate Limiting & Isolation (`verify_rate_limit` dependency, Spec 0006)
 - [x] Implemented Usage Metering Engine (`/v1/usage/summary`, roll-up aggregation, and DLQ routing, Spec 0009)
-- [x] Comprehensive test suites for proxy routing, guardrails filters, rate limiting, and metering (163 tests passing)
+- [x] Comprehensive test suites for proxy routing, guardrails filters, rate limiting, and metering (222 tests passing)
+- [x] Implemented API Key Rotation (hashed store, digest index, rotate with grace window, revocation tombstones, Spec 0010)
+- [x] Implemented Admin Dashboard (per service health probes, tenant quality/failure/rate counters, Spec 0011)
+- [x] Implemented the curated Public API surface (six contract paths at `/docs`, Bearer over key precedence, machine keys on all four contract routes, Spec 0012)
 - [ ] Implement real billing integration (Stripe)
 - [ ] Implement real telemetry aggregation from Redis $\rightarrow$ Splunk
 - [ ] Build out the Java Gateway core logic
+
+## Operational Notes
+- `gateway-python` bakes its image at build time and has no source volume, so a running container can be many changes behind. Run `docker compose up -d --build gateway-python` before verifying anything against port 8000, or you will be testing stale code.
 
 ## Project Memory
 For quick recall of recent changes, refer to the git history or the `docs/progress.md` (if created).

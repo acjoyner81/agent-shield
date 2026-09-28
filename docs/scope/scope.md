@@ -21,7 +21,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 7 | Tenant Rate Limiting | Slice 3 | done |
 | 8 | Usage Metering | Slice 3 | done |
 | 9 | Admin Dashboard | Slice 4 | in-progress |
-| 10 | Public API | Slice 4 | in-progress |
+| 10 | Public API | Slice 4 | done |
 | 11 | API Key Rotation | Slice 4 | in-progress |
 
 ## Foundations
@@ -149,7 +149,7 @@ Create Angular components for the portal to display daily token consumption and 
 - [ ] Test it: `/test admin dashboard`
 Spec 0011 · `docs/specs/0011-admin-dashboard/index.md` · code in `gateway/pricing.py`, `gateway/metering.py`, `gateway/main.py`, `portal-frontend/src/app/features/dashboard/`
 
-### 9. Public API · in-progress
+### 9. Public API · done
 Expose the FastAPI OpenAPI documentation and provide a way for tenants to generate API keys.
 **Done when:** /docs is accessible and API keys allow programmatic access to the gateway.
 - [x] Design it (spec): `/architect public api` → Spec 0012
@@ -160,8 +160,8 @@ Expose the FastAPI OpenAPI documentation and provide a way for tenants to genera
    - [x] Document that a caller supplied `X-Tenant-ID` is never authoritative
    - [x] Accept a machine key on all four contract routes
    - [x] Lock the contract with schema and machine access tests
-- [ ] Verify it: `/check verify public api`
-- [ ] Test it: `/test public api`
+- [x] Verify it: `/check verify public api`
+- [x] Test it: `/test public api`
 - [ ] Review it: `/check review public api`
 Spec 0012 · `docs/specs/0012-public-api/index.md` · code in `gateway/main.py`, `gateway/keys.py`, `gateway/metering.py`
 
