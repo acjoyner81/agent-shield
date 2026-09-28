@@ -4,11 +4,16 @@ from fastapi import HTTPException, status
 
 # Patterns for identifying prompt injection attempts
 PROMPT_INJECTION_PATTERNS = [
-    r"(?i)ignore\s+previous\s+instructions",
-    r"(?i)system\s*:\s*you\s+are\s+now",
+    r"(?i)\bignore\s+(?:all\s+|any\s+)?previous\s+instructions\b",
+    r"(?i)\b(?:disregard|ignore)\s+\w+\s+(?:instructions|guidelines|safety|policy|context)\b",
     r"(?i)disregard\s+all\s+prior\s+context",
+    r"(?i)system\s*:\s*you\s+are\s+now",
+    r"(?i)system\s+override",
+    r"(?i)\breveal\s+(?:your|the)\s+system\s+prompt\b",
+    r"(?i)\bdump\s+(?:environment\s+variables|env\s+(?:variables?|vars?)|secrets|credentials|api\s+keys?)\b",
     r"(?i)override\s+system\s+prompt",
-    r"(?i)jailbreak",
+    r"(?i)\bgenerate\s+(?:malicious\s+|exploit\s+|working\s+)?(?:exploit\s+)?code\b",
+    r"(?i)\bjailbreak\b",
 ]
 
 # Regex patterns for detecting sensitive PII

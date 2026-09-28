@@ -15,8 +15,10 @@ class Settings(BaseSettings):
     default_rate_limit_rpm: int = 60
     default_daily_budget_usd: float = 10.0
     mcp_server_transport: str = "stdio"
+    prices_file: str = "config/prices.json"
     eval_enabled: bool = False
     eval_score_threshold: float = 0.85
+    api_key_grace_period_seconds: int = 86400
 
     # Stripe Billing & Webhook Configuration
     stripe_api_key: str = ""

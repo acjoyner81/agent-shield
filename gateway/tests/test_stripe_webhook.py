@@ -35,7 +35,7 @@ class TestWebhooksStripeEndpoint:
 
         response = client.post(
             "/v1/webhooks/stripe",
-            data=json.dumps(mock_stripe_event),
+            content=json.dumps(mock_stripe_event),
             headers={"stripe-signature": "test_sig"}
         )
 
@@ -50,7 +50,7 @@ class TestWebhooksStripeEndpoint:
 
         response = client.post(
             "/v1/webhooks/stripe",
-            data="{}",
+            content="{}",
             headers={"stripe-signature": "invalid_sig"}
         )
 
@@ -76,7 +76,7 @@ class TestWebhooksStripeEndpoint:
         with patch("gateway.webhooks.clear_tenant_entitlements") as mock_clear:
             response = client.post(
                 "/v1/webhooks/stripe",
-                data=json.dumps(deleted_event),
+                content=json.dumps(deleted_event),
                 headers={"stripe-signature": "test_sig"}
             )
 
@@ -107,7 +107,7 @@ class TestWebhooksStripeEndpoint:
         with patch("gateway.webhooks.set_tenant_entitlements") as mock_set:
             response = client.post(
                 "/v1/webhooks/stripe",
-                data=json.dumps(updated_event),
+                content=json.dumps(updated_event),
                 headers={"stripe-signature": "test_sig"}
             )
 
@@ -127,7 +127,7 @@ class TestWebhooksStripeEndpoint:
 
         response = client.post(
             "/v1/webhooks/stripe",
-            data=json.dumps(unexpected_event),
+            content=json.dumps(unexpected_event),
             headers={"stripe-signature": "test_sig"}
         )
 
@@ -141,7 +141,7 @@ class TestWebhooksStripeEndpoint:
 
         response = client.post(
             "/v1/webhooks/stripe",
-            data=b'{"fake": "data"}',
+            content=b'{"fake": "data"}',
             headers={"stripe-signature": "forged_sig"}
         )
 
@@ -155,7 +155,7 @@ class TestWebhooksStripeEndpoint:
 
         response = client.post(
             "/v1/webhooks/stripe",
-            data="{}",
+            content="{}",
             headers={}
         )
 
@@ -184,7 +184,7 @@ class TestBillingWebhookEndpoint:
 
         response = client.post(
             "/api/v1/billing/webhook",
-            data=json.dumps(mock_stripe_event),
+            content=json.dumps(mock_stripe_event),
             headers={"stripe-signature": "test_sig"}
         )
 
@@ -199,7 +199,7 @@ class TestBillingWebhookEndpoint:
 
         response = client.post(
             "/api/v1/billing/webhook",
-            data=b"{}",
+            content=b"{}",
             headers={"stripe-signature": "invalid_sig"}
         )
 
@@ -225,7 +225,7 @@ class TestBillingWebhookEndpoint:
         with patch("gateway.webhooks.clear_tenant_entitlements") as mock_clear:
             response = client.post(
                 "/api/v1/billing/webhook",
-                data=json.dumps(deleted_event),
+                content=json.dumps(deleted_event),
                 headers={"stripe-signature": "test_sig"}
             )
 
@@ -251,7 +251,7 @@ class TestBillingWebhookEndpoint:
         with patch("gateway.webhooks.set_tenant_entitlements") as mock_set:
             response = client.post(
                 "/api/v1/billing/webhook",
-                data=json.dumps(updated_event),
+                content=json.dumps(updated_event),
                 headers={"stripe-signature": "test_sig"}
             )
 
@@ -268,7 +268,7 @@ class TestWebhookSecurityCases:
             mock_construct.side_effect = stripe.error.SignatureVerificationError("Missing", "sig")
             response = client.post(
                 "/v1/webhooks/stripe",
-                data=b"{}",
+                content=b"{}",
                 headers={}
             )
         assert response.status_code == 400
@@ -276,7 +276,7 @@ class TestWebhookSecurityCases:
     def test_webhook_empty_body(self):
         response = client.post(
             "/v1/webhooks/stripe",
-            data=b"",
+            content=b"",
             headers={"stripe-signature": "test_sig"}
         )
         assert response.status_code in (400, 200)
@@ -290,7 +290,7 @@ class TestWebhookSecurityCases:
         with patch("stripe.Webhook.construct_event", return_value=charge_event):
             response = client.post(
                 "/v1/webhooks/stripe",
-                data=json.dumps(charge_event),
+                content=json.dumps(charge_event),
                 headers={"stripe-signature": "test_sig"}
             )
         assert response.status_code == 200

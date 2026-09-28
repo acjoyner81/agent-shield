@@ -40,13 +40,23 @@ def test_health_bypasses_rate_limit(mock_redis):
 
 
 def test_telemetry_logs_get_returns_list(mock_redis):
-    """Verify /v1/telemetry/logs returns telemetry history."""
+    """Verify /v1/telemetry/logs returns tenant-scoped telemetry history."""
     mock_redis.lrange.return_value = [
         '{"tenant_id": "tenant_alpha", "level": "INFO", "message": "test"}'
     ]
-    response = client.get("/v1/telemetry/logs")
+    response = client.get(
+        "/v1/telemetry/logs",
+        headers={"Authorization": "Bearer dev-mock-token"},
+    )
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+def test_telemetry_logs_get_requires_auth(mock_redis):
+    """Verify /v1/telemetry/logs does not leak data anonymously."""
+    response = client.get("/v1/telemetry/logs")
+    assert response.status_code == 401
+    assert mock_redis.lrange.called is False
 
 
 def test_telemetry_logs_post_accepts_payload(mock_redis):

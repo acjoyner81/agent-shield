@@ -19,9 +19,10 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 5 | RBAC Enforcement | Slice 2 | planned |
 | 6 | Hybrid Stripe Integration | Slice 3 | in-progress |
 | 7 | Tenant Rate Limiting | Slice 3 | done |
-| 8 | Usage Metering | Slice 3 | planned |
-| 9 | Admin Dashboard | Slice 4 | planned |
-| 10 | Public API | Slice 4 | planned |
+| 8 | Usage Metering | Slice 3 | done |
+| 9 | Admin Dashboard | Slice 4 | in-progress |
+| 10 | Public API | Slice 4 | in-progress |
+| 11 | API Key Rotation | Slice 4 | in-progress |
 
 ## Foundations
 
@@ -47,8 +48,8 @@ Build the actual shipping logic that moves telemetry data from Redis to the Splu
    - [x] Splunk HEC batch client
    - [x] Exponential backoff + DLQ routing
    - [x] NDJSON stdout fallback
-- [ ] Verify it: `/check verify redis to splunk aggregator`
-- [ ] Test it: `/test redis to splunk aggregator`
+- [x] Verify it: `/check verify redis to splunk aggregator`
+- [x] Test it: `/test redis to splunk aggregator`
 Spec 0002 · code in `gateway/aggregator.py`
 
 ### 3. End to End Flow · done
@@ -118,22 +119,66 @@ Enforce token bucket rate limits in Redis across all `/v1/*` routes per tenant.
 - [x] Test it: `/test tenant rate limiting`
 Spec 0006 · `docs/specs/0006-rate-limiting.md` · code in `gateway/rate_limit.py`
 
-### 8. Usage Metering · needs a decision
+### 8. Usage Metering · done · GA
 Build the logic to count tokens and tool executions per tenant in real time.
-**Done when:** usage counts are accurately recorded in Redis and available for the billing engine.
-- [ ] Design it (spec): `/architect usage metering`
+**Done when:** usage counts are accurately recorded in Redis/DB and available for the billing engine.
+- [x] Design it (spec): `/architect usage metering` → Spec 0009
+- [x] Build it: `/develop usage metering`
+   - [x] Idempotent event processing & deduplication (`process_token_event`)
+   - [x] Roll-up aggregates by tenant, model, and date
+   - [x] REST endpoint `/v1/usage/summary`
+   - [x] Dead-letter queue routing (`telemetry:dlq`)
+- [x] Verify it: `/check verify usage metering`
+- [x] Test it: `/test usage metering`
+Spec 0009 · `docs/specs/0009-usage-metering-engine/index.md` · code in `gateway/metering.py`
 
 ## Slice 4: Tenant Experience
 
-### 8. Admin Dashboard · needs a decision
+### 8. Admin Dashboard · in-progress
 Create Angular components for the portal to display daily token consumption and estimated costs.
 **Done when:** a tenant admin can see their usage metrics on the dashboard.
-- [ ] Design it (spec): `/architect admin dashboard`
+- [x] Design it (spec): `/architect admin dashboard` → Spec 0011
+- [x] Build it: `/develop admin dashboard`
+   - [x] Add the rate card and a read time cost loader
+   - [x] Fold security and request events into per tenant daily counters
+   - [x] Return cost, quality, and failure counters on the usage summary
+   - [x] Add `/v1/health/services` with a probe per service
+   - [x] Wire the dashboard cards to live values on a 60s poll
+   - [x] Cover cost, role gate, tenant scope, and probes with tests
+- [ ] Verify it: `/check verify admin dashboard`
+- [ ] Test it: `/test admin dashboard`
+Spec 0011 · `docs/specs/0011-admin-dashboard/index.md` · code in `gateway/pricing.py`, `gateway/metering.py`, `gateway/main.py`, `portal-frontend/src/app/features/dashboard/`
 
-### 9. Public API · needs a decision
+### 9. Public API · in-progress
 Expose the FastAPI OpenAPI documentation and provide a way for tenants to generate API keys.
 **Done when:** /docs is accessible and API keys allow programmatic access to the gateway.
-- [ ] Design it (spec): `/architect public api`
+- [x] Design it (spec): `/architect public api` → Spec 0012
+- [x] Build it: `/develop public api`
+   - [x] Register Bearer and `X-Tenant-API-Key` security schemes with the precedence rule
+   - [x] Exclude health, telemetry ingest, webhook, `/api` aliases, and billing UI routes
+   - [x] Add summaries, tags, descriptions, and examples to the four contract routes
+   - [x] Document that a caller supplied `X-Tenant-ID` is never authoritative
+   - [x] Accept a machine key on all four contract routes
+   - [x] Lock the contract with schema and machine access tests
+- [ ] Verify it: `/check verify public api`
+- [ ] Test it: `/test public api`
+- [ ] Review it: `/check review public api`
+Spec 0012 · `docs/specs/0012-public-api/index.md` · code in `gateway/main.py`, `gateway/keys.py`, `gateway/metering.py`
+
+### 10. API Key Rotation · in-progress · GA
+Give machine access a real credential lifecycle: hashed storage, rotation with a grace window, revocation tombstones, and permission scopes enforced on RBAC routes.
+**Done when:** clients can rotate keys without downtime, revoked or expired keys are rejected at the perimeter, and rotation activity is auditable in Splunk.
+- [x] Design it (spec): `/architect api key rotation` → Spec 0010
+- [x] Build it: `/develop api key rotation`
+   - [x] Hashed key store with digest index (create/list)
+   - [x] Rotate endpoint with grace window + tombstone revocation
+   - [x] `verify_api_key` dependency wired into tools/chat routes
+   - [x] Machine principals enforced by `require_permission`
+   - [x] Key rotation telemetry event
+- [x] Verify it: `/check verify api key rotation`
+- [x] Test it: `/test api key rotation`
+- [x] Review it: `/check review api key rotation`
+Spec 0010 · `docs/specs/0010-api-key-rotation/index.md` · code in `gateway/keys.py`, `gateway/auth.py`
 
 ## Deferred
 Out of scope for the current build pass, kept so the plan stays honest.

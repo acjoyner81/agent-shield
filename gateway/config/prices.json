@@ -1,0 +1,6 @@
+{
+  "gpt-4o": 0.0025,
+  "gpt-4o-mini": 0.00015,
+  "claude-3-5-sonnet": 0.003,
+  "claude-3-5-haiku": 0.0008
+}

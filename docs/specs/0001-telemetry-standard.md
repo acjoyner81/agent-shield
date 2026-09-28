@@ -1,7 +1,7 @@
 # 0001. Adopt a standardized telemetry and logging pattern for all services
 
 **Date**: 2026-09-14
-**Status**: Proposed
+**Status**: Accepted
 
 ## Summary
 
@@ -72,6 +72,8 @@ This approach balances immediate simplicity with long term scaling. Using `trace
 ## Standard definition
 
 **Canonical pattern**:
+
+> Reconciled 2026-09-24: the flat log entry below remains in force for the tracing, scrubbing, and NDJSON decisions. The event envelope (specversion, event_id, type, data) that carries them today is defined by spec 0008 and implemented in `gateway/telemetry.py`, which supersedes the flat JSON shape shown here.
 
 Python (FastAPI):
 ```python

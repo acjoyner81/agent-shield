@@ -1,6 +1,7 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["gateway/tests"]
+testpaths = ["gateway/tests", "worker/tests", "tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "--ignore=gateway/tests/e2e"

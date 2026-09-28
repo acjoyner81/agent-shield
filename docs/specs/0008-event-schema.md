@@ -1,7 +1,7 @@
 # 0008. Open Telemetry Standard & Event Schema
 
 **Date**: 2026-09-22
-**Status**: Proposed
+**Status**: Accepted
 
 ## Summary
 
@@ -217,10 +217,10 @@ def emit_event(tenant_id, user_id, trace_id, span_id, event_type, data, source="
 
 ## Follow-up
 
-- [ ] Update `gateway/telemetry.py` to produce the new event schema, satisfies **AC-7**
-- [ ] Add Pydantic model for event validation in `gateway/telemetry.py`, satisfies **AC-1**
-- [ ] Update `gateway/tests/test_telemetry.py` if it exists, or add new tests for the event schema, satisfies **AC-1**, **AC-2**
-- [ ] Coordinate with the Redis-to-Splunk Aggregator (spec 0002) team to handle both old and new format during migration, satisfies **AC-6**
+- [x] Update `gateway/telemetry.py` to produce the new event schema, satisfies **AC-7**, shipped 2026-09-24
+- [x] Add Pydantic model for event validation in `gateway/telemetry.py`, satisfies **AC-1**, shipped 2026-09-24 (`EventEnvelope`)
+- [x] Update `gateway/tests/test_telemetry.py` if it exists, or add new tests for the event schema, satisfies **AC-1**, **AC-2**
+- [x] Coordinate with the Redis-to-Splunk Aggregator (spec 0002) team to handle both old and new format during migration, satisfies **AC-6**, moot since 0002 ships the single 0008 format
 
 ## References
 

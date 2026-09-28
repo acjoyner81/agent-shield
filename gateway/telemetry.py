@@ -13,6 +13,7 @@ VALID_EVENT_TYPES = {
     "agentshield.token.usage",
     "agentshield.security.authz_failure",
     "agentshield.security.rate_limit_exceeded",
+    "agentshield.security.key_rotation",
     "agentshield.billing.subscription_changed",
 }
 
@@ -22,6 +23,7 @@ class EventType(str, Enum):
     TOKEN_USAGE = "agentshield.token.usage"
     AUTHZ_FAILURE = "agentshield.security.authz_failure"
     RATE_LIMIT_EXCEEDED = "agentshield.security.rate_limit_exceeded"
+    KEY_ROTATION = "agentshield.security.key_rotation"
     SUBSCRIPTION_CHANGED = "agentshield.billing.subscription_changed"
 
 
@@ -50,6 +52,15 @@ class BillingData(BaseModel):
     stripe_customer_id: Optional[str] = None
     tier: Optional[str] = None
     status: Optional[str] = None
+
+
+class KeyRotationData(BaseModel):
+    key_id: str
+    action: str
+    status: str
+    version: Optional[int] = None
+    rotated_at: Optional[str] = None
+    superseded_by: Optional[str] = None
 
 
 class EventEnvelope(BaseModel):
@@ -100,14 +111,22 @@ def emit_event(
 
     payload = envelope.model_dump_json()
 
-    if redis_client:
+    # If no client passed, attempt to use global gateway redis client if available
+    client = redis_client
+    if client is None:
         try:
-            redis_client.xadd("telemetry:queue", {"payload": payload})
+            from gateway.rate_limit import get_redis_client
+            client = get_redis_client()
+        except Exception:
+            pass
+
+    if client:
+        try:
+            client.xadd("telemetry:queue", {"payload": payload})
         except Exception as e:
             logger.error(f"Failed to push to Redis stream: {e}")
-            print(payload)
     else:
-        print(payload)
+        logger.debug(f"Telemetry payload (unbuffered): {payload}")
 
     return payload
 
@@ -165,6 +184,7 @@ def emit_token_usage(
     user_id: Optional[str] = None,
     trace_id: Optional[str] = None,
     span_id: Optional[str] = None,
+    redis_client: Optional[Any] = None,
 ) -> str:
     data = TokenData(
         input=input_tokens,
@@ -179,6 +199,7 @@ def emit_token_usage(
         user_id=user_id,
         trace_id=trace_id,
         span_id=span_id,
+        redis_client=redis_client,
     )
 
 
@@ -241,6 +262,38 @@ def emit_billing_subscription_changed(
         user_id=user_id,
         trace_id=trace_id,
         span_id=span_id,
+    )
+
+
+def emit_key_rotation(
+    tenant_id: str,
+    key_id: str,
+    action: str,
+    status: str,
+    version: Optional[int] = None,
+    rotated_at: Optional[str] = None,
+    superseded_by: Optional[str] = None,
+    user_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    span_id: Optional[str] = None,
+    redis_client: Optional[Any] = None,
+) -> str:
+    data = KeyRotationData(
+        key_id=key_id,
+        action=action,
+        status=status,
+        version=version,
+        rotated_at=rotated_at,
+        superseded_by=superseded_by,
+    ).model_dump()
+    return emit_event(
+        tenant_id=tenant_id,
+        event_type=EventType.KEY_ROTATION.value,
+        data=data,
+        user_id=user_id,
+        trace_id=trace_id,
+        span_id=span_id,
+        redis_client=redis_client,
     )
 
 

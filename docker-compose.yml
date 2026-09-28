@@ -72,6 +72,23 @@ services:
       redis:
         condition: service_healthy
 
+  telemetry-aggregator:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    command: ["python", "-m", "gateway.aggregator"]
+    container_name: agentshield-telemetry-aggregator
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-http://splunk:8088/services/collector/raw}
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:?Set SPLUNK_HEC_TOKEN in .env}
+    depends_on:
+      redis:
+        condition: service_healthy
+      splunk:
+        condition: service_started
+    restart: unless-stopped
+
   portal-frontend:
     build:
       context: ./portal-frontend  # Update path if your UI folder is named differently (e.g., ./ui or ./web)

@@ -12,9 +12,51 @@ export interface TelemetryLog {
   traceId: string;
 }
 
+export interface UsageSummary {
+  tenant_id: string;
+  period_start: string;
+  period_end: string;
+  totals: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    total_requests: number;
+    quality_passed: number;
+    failed_requests: number;
+    rate_limited_requests: number;
+    estimated_cost_usd: number | null;
+  };
+  by_model: Array<{
+    model: string;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    request_count: number;
+    cost_usd: number | null;
+  }>;
+}
+
+export interface ServiceHealth {
+  name: string;
+  status: 'healthy' | 'degraded';
+  latency_ms: number;
+}
+
+export interface ServiceHealthResponse {
+  services: ServiceHealth[];
+  overall: 'healthy' | 'degraded';
+}
+
+/** Dashboard poll cadence (Spec 0011 AC-5). */
+export const AUTO_REFRESH_INTERVAL_MS = 60000;
+
 @Injectable({ providedIn: 'root' })
 export class TelemetryService {
   private readonly apiUrl = '/api/v1/telemetry';
+  private refreshHandle: ReturnType<typeof setInterval> | null = null;
+
+  readonly usage = signal<UsageSummary | null>(null);
+  readonly health = signal<ServiceHealthResponse | null>(null);
   readonly logs = signal<TelemetryLog[]>([
     { eventId: 'EVT-1030', timestamp: 'Today, 10:42:18', tenantId: 'northstar-labs', costUsd: 0.0038, statusCode: 429, latencyMs: 12, evalPassed: true, traceId: 'dt-7fa2c1' },
     { eventId: 'EVT-1029', timestamp: 'Today, 10:41:56', tenantId: 'harbor-works', costUsd: 0.0182, statusCode: 200, latencyMs: 142, evalPassed: true, traceId: 'dt-7fa2af' },
@@ -30,12 +72,60 @@ export class TelemetryService {
     return entries.length ? Math.round((entries.filter((log) => log.evalPassed).length / entries.length) * 100) : 0;
   });
 
+  /** Period spend, null unless the principal holds billing:admin (Spec 0011 AC-2, AC-6). */
+  readonly estimatedCostUsd = computed(() => this.usage()?.totals?.estimated_cost_usd ?? null);
+  readonly canSeeCost = computed(() => this.estimatedCostUsd() !== null);
+
+  /** Quality pass rate over the period, derived from the eval flagged request count. */
+  readonly periodPassRate = computed(() => {
+    const totals = this.usage()?.totals;
+    if (!totals || !totals.total_requests) {
+      return 0;
+    }
+    return Math.round((totals.quality_passed / totals.total_requests) * 100);
+  });
+
+  readonly periodFailures = computed(() => this.usage()?.totals?.failed_requests ?? 0);
+  readonly periodRateLimited = computed(() => this.usage()?.totals?.rate_limited_requests ?? 0);
+
   constructor(private readonly http: HttpClient) {}
 
   fetchRecentLogs(): void {
     this.http.get<TelemetryLog[]>(`${this.apiUrl}/logs`).subscribe({
       next: (data) => this.logs.set(data),
-      error: () => undefined,
+      error: (err) => console.warn('Failed to fetch telemetry logs', err),
     });
+  }
+
+  fetchUsageSummary(): void {
+    this.http.get<UsageSummary>('/api/v1/usage/summary').subscribe({
+      next: (data) => this.usage.set(data),
+      error: (err) => console.warn('Failed to fetch usage summary', err),
+    });
+  }
+
+  fetchServiceHealth(): void {
+    this.http.get<ServiceHealthResponse>('/api/v1/health/services').subscribe({
+      next: (data) => this.health.set(data),
+      error: (err) => console.warn('Failed to fetch service health', err),
+    });
+  }
+
+  /** Manual refresh: pull both dashboard signals now (Spec 0011 AC-5). */
+  refreshDashboard(): void {
+    this.fetchUsageSummary();
+    this.fetchServiceHealth();
+  }
+
+  startAutoRefresh(intervalMs: number = AUTO_REFRESH_INTERVAL_MS): void {
+    this.stopAutoRefresh();
+    this.refreshHandle = setInterval(() => this.refreshDashboard(), intervalMs);
+  }
+
+  stopAutoRefresh(): void {
+    if (this.refreshHandle !== null) {
+      clearInterval(this.refreshHandle);
+      this.refreshHandle = null;
+    }
   }
 }

@@ -29,6 +29,8 @@ MAX_RETRIES = 5
 # Redis Keys
 QUEUE_KEY = "telemetry:queue"
 DLQ_KEY = "telemetry:dlq"
+GROUP_NAME = "telemetry-aggregator"
+CONSUMER_NAME = f"telemetry-aggregator-{os.getpid()}"
 
 async def scrub_pii(text: str) -> str:
     """Simple PII masking as defined in 0001-telemetry-standard."""
@@ -75,13 +77,26 @@ async def dump_to_stdout(batch: List[str]):
         print(log)
         sys.stdout.flush()
 
+async def ensure_consumer_group(client):
+    try:
+        await client.xgroup_create(
+            name=QUEUE_KEY,
+            groupname=GROUP_NAME,
+            id="0",
+            mkstream=True,
+        )
+    except redis.ResponseError as exc:
+        if "BUSYGROUP" not in str(exc):
+            raise
+
 async def run_aggregator():
     logger.info(f"Starting Telemetry Aggregator (Batch: {BATCH_SIZE}, Timeout: {BATCH_TIMEOUT_SEC}s)")
     
     r = redis.from_url(REDIS_URL, decode_responses=True)
+    await ensure_consumer_group(r)
     async with httpx.AsyncClient() as client:
         while True:
-            batch = []
+            batch: List[tuple[str, str]] = []
             start_time = time.time()
 
             # 1. Collect Batch
@@ -89,15 +104,19 @@ async def run_aggregator():
                 # Check timeout
                 if time.time() - start_time >= BATCH_TIMEOUT_SEC:
                     break
-                
-                # Try to pop a log from the queue
-                # Using LPOP for simplicity; in production we might use RPOPLPUSH for reliability
-                log = await r.lpop(QUEUE_KEY)
-                if log:
-                    batch.append(log)
-                else:
-                    # No logs available, sleep briefly to avoid CPU spinning
-                    await asyncio.sleep(0.1)
+
+                entries = await r.xreadgroup(
+                    groupname=GROUP_NAME,
+                    consumername=CONSUMER_NAME,
+                    streams={QUEUE_KEY: ">"},
+                    count=BATCH_SIZE - len(batch),
+                    block=100,
+                )
+                for _, messages in entries:
+                    for message_id, fields in messages:
+                        payload = fields.get("payload")
+                        if payload is not None:
+                            batch.append((message_id, payload))
 
             if not batch:
                 continue
@@ -105,10 +124,11 @@ async def run_aggregator():
             # 2. Ship with Retries
             success = False
             attempts = 0
-            
+            logs = [payload for _, payload in batch]
+
             while attempts < MAX_RETRIES:
                 try:
-                    await ship_to_splunk(client, batch)
+                    await ship_to_splunk(client, logs)
                     success = True
                     break
                 except Exception as e:
@@ -119,17 +139,20 @@ async def run_aggregator():
 
             # 3. Handle Outcome
             if success:
-                logger.info(f"Successfully shipped {len(batch)} logs to Splunk.")
+                logger.info(f"Successfully shipped {len(logs)} logs to Splunk.")
             else:
                 # Move to DLQ
-                logger.error(f"Max retries reached. Moving {len(batch)} logs to {DLQ_KEY}.")
+                logger.error(f"Max retries reached. Moving {len(logs)} logs to {DLQ_KEY}.")
                 async with r.pipeline() as pipe:
-                    for log in batch:
+                    for log in logs:
                         pipe.rpush(DLQ_KEY, log)
                     await pipe.execute()
-                
+
                 # Also dump to stdout as emergency fallback
-                await dump_to_stdout(batch)
+                await dump_to_stdout(logs)
+
+            message_ids = [message_id for message_id, _ in batch]
+            await r.xack(QUEUE_KEY, GROUP_NAME, *message_ids)
 
 if __name__ == "__main__":
     try:

@@ -1,7 +1,7 @@
 # 0002. Implement Redis to Splunk Telemetry Aggregator
 
 **Date**: 2026-09-14
-**Status**: Proposed
+**Status**: Accepted
 
 ## Summary
 

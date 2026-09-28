@@ -7,6 +7,7 @@ from typing import Optional
 import redis
 import stripe
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel
 
 from config.settings import settings
 from gateway.auth import get_verified_tenant
@@ -58,13 +59,36 @@ def ensure_stripe_customer(tenant_id: str, email: Optional[str] = None) -> str:
     return customer.id
 
 
+class CheckoutRequest(BaseModel):
+    price_id: Optional[str] = None
+    tier: Optional[str] = None
+
+TIER_TO_PRICE_MAP = {
+    "starter": settings.stripe_product_starter,
+    "pro": settings.stripe_product_pro,
+    "enterprise": settings.stripe_product_enterprise,
+}
+
 @router.post("/checkout")
 async def create_checkout_session(
+    request: Request,
     price_id: Optional[str] = None,
+    payload: Optional[CheckoutRequest] = None,
     tenant_id: str = Depends(get_verified_tenant),
 ) -> dict:
     """AC-3: Generate a Stripe Checkout session and return the URL."""
-    if not price_id:
+    target_price = price_id
+    if not target_price and payload:
+        target_price = payload.price_id or TIER_TO_PRICE_MAP.get(payload.tier or "")
+    if not target_price:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                target_price = body.get("price_id") or TIER_TO_PRICE_MAP.get(body.get("tier", ""))
+        except Exception:
+            pass
+
+    if not target_price:
         raise HTTPException(status_code=400, detail="price_id is required")
 
     try:
@@ -72,7 +96,7 @@ async def create_checkout_session(
         session = stripe.checkout.Session.create(
             customer=customer_id,
             mode="subscription",
-            line_items=[{"price": price_id, "quantity": 1}],
+            line_items=[{"price": target_price, "quantity": 1}],
             success_url=settings.stripe_success_url,
             cancel_url=settings.stripe_cancel_url,
             metadata={"tenant_id": tenant_id},
@@ -80,7 +104,7 @@ async def create_checkout_session(
     except stripe.error.StripeError as e:
         raise HTTPException(status_code=400, detail=f"Stripe error: {e.user_message}")
 
-    return {"checkout_url": session.url, "session_id": session.id}
+    return {"checkoutUrl": session.url, "session_id": session.id}
 
 
 @router.post("/portal")
@@ -104,7 +128,7 @@ async def create_portal_session(
     return {"portal_url": session.url}
 
 
-@router.post("/webhook")
+@router.post("/webhook", include_in_schema=False)
 async def stripe_webhook(
     request: Request,
     stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature"),

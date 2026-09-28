@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-22
 
-**Status**: Proposed
+**Status**: Accepted
 
 ## Summary
 
@@ -98,6 +98,8 @@ Option 1 provides the durability and auditability necessary for financial billin
 ## Feature Design
 
 ### Data Model
+
+> Reconciled 2026-09-24: the metering engine shipped on Redis, not PostgreSQL. The SQL schemas below are the originally designed target; the implemented layout in `gateway/metering.py` satisfies AC-1 through AC-6 with Redis keys (a processed event set for deduplication, per tenant per date per model daily roll-ups, and a per tenant per month billing hash feeding the Stripe sync worker). The PostgreSQL ledger remains optional if a SQL audit trail is later required.
 
 #### 1. PostgreSQL Ledger Table (`usage_ledger`)
 
@@ -350,8 +352,8 @@ async def process_token_event(raw_event: str) -> bool:
 
 ## Rollout & Follow-up
 
-* [ ] Create SQLAlchemy models and database migrations for `usage_ledger` and `tenant_daily_usage`.
-* [ ] Implement `UsageConsumer` worker service for Redis `telemetry:queue`.
-* [ ] Implement background Stripe synchronization task for unbilled usage records.
-* [ ] Add `/v1/usage/summary` REST endpoint in FastAPI gateway.
-* [ ] Add test suite (`gateway/tests/test_metering.py`) verifying ingestion, deduplication, and sync scenarios.
+* [x] Create SQLAlchemy models and database migrations for `usage_ledger` and `tenant_daily_usage`, superseded by the Redis layout shipped in `gateway/metering.py`
+* [x] Implement `UsageConsumer` worker service for Redis `telemetry:queue`, shipped in `worker/stream_worker.py`
+* [x] Implement background Stripe synchronization task for unbilled usage records, shipped in `worker/stripe_sync_worker.py`
+* [x] Add `/v1/usage/summary` REST endpoint in FastAPI gateway, shipped in `gateway/metering.py`
+* [x] Add test suite (`gateway/tests/test_metering.py`) verifying ingestion, deduplication, and sync scenarios

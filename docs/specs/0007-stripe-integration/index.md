@@ -37,7 +37,7 @@ Entitlement state cached in Redis:
 **API surface**:
 | Endpoint | Method | Key inputs | Key outputs | Auth | Key errors |
 |---|---|---|---|---|---|
-| /v1/billing/checkout | POST | `price_id: str` | `checkout_url: str` | Bearer | 400 Bad Request, 401 Unauthorized |
+| /v1/billing/checkout | POST | `price_id: str` | `checkoutUrl: str` | Bearer | 400 Bad Request, 401 Unauthorized |
 | /v1/billing/portal | POST | None | `portal_url: str` | Bearer | 401 Unauthorized, 404 Not Found |
 | /v1/billing/webhook | POST | Raw body, `Stripe-Signature` | `{"status": "success"}` | Webhook Signature | 400 Invalid Signature |
 
@@ -45,7 +45,7 @@ Entitlement state cached in Redis:
 | Action | Value produced / displayed | Source |
 |---|---|---|
 | Entitlement Check | `is_active` | Redis `entitlement:{tenant_id}` status |
-| Checkout Session | `checkout_url` | `stripe.checkout.Session.create()` response |
+| Checkout Session | `checkoutUrl` | `stripe.checkout.Session.create()` response |
 | Portal Session | `portal_url` | `stripe.billing_portal.Session.create()` response |
 
 **Key invariants**:

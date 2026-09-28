@@ -1,4 +1,4 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import json
 import os
 
@@ -89,7 +89,7 @@ def test_checkout_creates_session(mock_customer, mock_session_create):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["checkout_url"] == "https://checkout.stripe.com/123"
+    assert body["checkoutUrl"] == "https://checkout.stripe.com/123"
     assert body["session_id"] == "cs_test"
 
 
@@ -123,7 +123,7 @@ def test_portal_returns_url(mock_portal, mock_redis_get):
 def test_webhook_subscription_created_caches_entitlement(mock_setex, mock_construct_event):
     mock_construct_event.return_value = SUBSCRIPTION_EVENT
 
-    response = client.post("/v1/billing/webhook", data=json.dumps(SUBSCRIPTION_EVENT), headers=WEBHOOK_HEADERS)
+    response = client.post("/v1/billing/webhook", content=json.dumps(SUBSCRIPTION_EVENT), headers=WEBHOOK_HEADERS)
 
     assert response.status_code == 200
     assert response.json() == {"status": "success"}
@@ -135,7 +135,7 @@ def test_webhook_subscription_created_caches_entitlement(mock_setex, mock_constr
 def test_webhook_subscription_deleted_clears_entitlement(mock_delete, mock_construct_event):
     mock_construct_event.return_value = DELETED_EVENT
 
-    response = client.post("/v1/billing/webhook", data=json.dumps(DELETED_EVENT), headers=WEBHOOK_HEADERS)
+    response = client.post("/v1/billing/webhook", content=json.dumps(DELETED_EVENT), headers=WEBHOOK_HEADERS)
 
     assert response.status_code == 200
     assert response.json() == {"status": "success"}
@@ -146,7 +146,7 @@ def test_webhook_subscription_deleted_clears_entitlement(mock_delete, mock_const
 def test_webhook_invalid_signature_rejected(mock_construct_event):
     mock_construct_event.side_effect = stripe.error.SignatureVerificationError("Invalid", "sig")
 
-    response = client.post("/v1/billing/webhook", data=b"{}", headers=WEBHOOK_HEADERS)
+    response = client.post("/v1/billing/webhook", content=b"{}", headers=WEBHOOK_HEADERS)
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid signature"
@@ -253,7 +253,7 @@ class TestWebhookSecurityCases:
     def test_webhook_missing_signature_header(self):
         with patch("gateway.billing.stripe.Webhook.construct_event") as mock_construct:
             mock_construct.side_effect = stripe.error.SignatureVerificationError("Missing", "sig")
-            response = client.post("/v1/billing/webhook", data=b"{}", headers={})
+            response = client.post("/v1/billing/webhook", content=b"{}", headers={})
         assert response.status_code == 400
 
     def test_webhook_empty_payload(self):
@@ -261,7 +261,7 @@ class TestWebhookSecurityCases:
             mock_construct.side_effect = stripe.error.SignatureVerificationError("Empty", "sig")
             response = client.post(
                 "/v1/billing/webhook",
-                data=b"",
+                content=b"",
                 headers=WEBHOOK_HEADERS,
             )
         assert response.status_code == 400
@@ -284,7 +284,7 @@ class TestWebhookSecurityCases:
              patch("gateway.billing.set_tenant_entitlements"):
             response = client.post(
                 "/v1/billing/webhook",
-                data=json.dumps(event_no_tenant),
+                content=json.dumps(event_no_tenant),
                 headers=WEBHOOK_HEADERS,
             )
         assert response.status_code == 200
@@ -295,7 +295,7 @@ class TestWebhookSecurityCases:
              patch("gateway.billing.set_tenant_entitlements") as mock_set_ent:
             response = client.post(
                 "/v1/billing/webhook",
-                data=json.dumps(SUBSCRIPTION_UPDATED_EVENT),
+                content=json.dumps(SUBSCRIPTION_UPDATED_EVENT),
                 headers=WEBHOOK_HEADERS,
             )
         assert response.status_code == 200
@@ -321,7 +321,7 @@ class TestWebhookSecurityCases:
              patch("gateway.billing.clear_tenant_entitlements"):
             response = client.post(
                 "/v1/billing/webhook",
-                data=json.dumps(event),
+                content=json.dumps(event),
                 headers=WEBHOOK_HEADERS,
             )
         assert response.status_code == 200
@@ -338,7 +338,7 @@ class TestWebhookPaymentSecurity:
         with patch("gateway.billing.stripe.Webhook.construct_event", return_value=unexpected_event):
             response = client.post(
                 "/v1/billing/webhook",
-                data=json.dumps(unexpected_event),
+                content=json.dumps(unexpected_event),
                 headers=WEBHOOK_HEADERS,
             )
         assert response.status_code == 200
@@ -349,8 +349,56 @@ class TestWebhookPaymentSecurity:
             mock_construct.side_effect = stripe.error.SignatureVerificationError("Forged payload", "sig")
             response = client.post(
                 "/v1/billing/webhook",
-                data=b'{"fake": "data"}',
+                content=b'{"fake": "data"}',
                 headers={"stripe-signature": "forged_sig"},
             )
         assert response.status_code == 400
         assert response.json()["detail"] == "Invalid signature"
+  
+        
+
+
+
+
+
+class TestTokenQuotaThrottling:
+    @patch("gateway.dependencies.aioredis.from_url")
+    def test_request_exceeds_token_quota_returns_402(self, mock_from_url):
+        # Mock the async redis client instance and its get method
+        mock_redis_client = AsyncMock()
+        mock_redis_client.get.return_value = "true"
+        mock_from_url.return_value = mock_redis_client
+
+        response = client.post(
+            "/v1/chat/completions",
+            headers={
+                **CLIENT_HEADERS,
+                "X-Tenant-ID": "tenant_alpha",
+                "X-Tenant-Tier": "free"
+            },
+            json={"prompt": "Hello", "model": "gpt-4o"}
+        )
+        assert response.status_code == 402
+
+    @patch("gateway.dependencies.aioredis.from_url")
+    def test_quota_uses_verified_tenant_ignoring_spoofed_header(self, mock_from_url):
+        """The quota gate must key off the authenticated principal, never headers."""
+        mock_redis_client = AsyncMock()
+        mock_redis_client.get.return_value = "false"
+        mock_from_url.return_value = mock_redis_client
+
+        response = client.post(
+            "/v1/chat/completions",
+            headers={
+                **CLIENT_HEADERS,
+                "X-Tenant-ID": "tenant_evil",
+                "X-Tenant-Tier": "enterprise",
+            },
+            json={"prompt": "Hello", "model": "gpt-4o"}
+        )
+        # 200 proves the over-limit lookup ran against the verified tenant and
+        # the request was not short-circuited by the spoofed tier header.
+        assert response.status_code == 200
+        queried_keys = [c.args[0] for c in mock_redis_client.get.await_args_list]
+        assert any(str(k).startswith("tenant:over_limit:tenant_alpha") for k in queried_keys)
+        assert all("tenant_evil" not in str(k) for k in queried_keys)

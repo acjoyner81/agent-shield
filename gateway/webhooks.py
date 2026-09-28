@@ -15,8 +15,8 @@ PRODUCT_TIER_MAP = {
     settings.stripe_product_enterprise: "enterprise",
 }
 
-@router.post("/v1/webhooks/stripe")
-@router.post("/api/v1/billing/webhook")
+@router.post("/v1/webhooks/stripe", include_in_schema=False)
+@router.post("/api/v1/billing/webhook", include_in_schema=False)
 async def stripe_webhook(request: Request, stripe_signature: str = Header(None)):
     payload = await request.body()
     
