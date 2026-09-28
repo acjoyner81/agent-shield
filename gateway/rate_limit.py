@@ -2,13 +2,13 @@
 
 import asyncio
 import math
-import os
 import time
 from typing import Optional, Tuple
 import redis
 from fastapi import HTTPException, Request, Response, status
 
 from config.settings import settings
+from gateway.auth import resolve_active_tenant
 from gateway.telemetry import emit_rate_limit_exceeded
 
 DEFAULT_TENANT_RPM = 60# Mappings for Stripe subscription tiers stored in Redis
@@ -93,32 +93,38 @@ def check_token_bucket(
 
 
 def extract_tenant_id(request: Request) -> Optional[str]:
-    """Extract tenant ID from request state, API key header, or tenant header."""
+    """Return the tenant of an already verified principal, or None.
+
+    Only a credential that passed `resolve_active_tenant` binds a tenant, so this
+    can never be steered by a caller supplied header (spec 0012 AC-3).
+    """
     state = getattr(request, "state", None)
-    if state and getattr(state, "tenant_id", None):
+    if state and getattr(state, "principal_verified", False) and getattr(state, "tenant_id", None):
         return str(state.tenant_id)
-
-    api_key = request.headers.get("X-Tenant-API-Key")
-    if api_key:
-        from gateway.main import TENANT_CONFIG
-
-        if api_key in TENANT_CONFIG:
-            return str(TENANT_CONFIG[api_key]["tenant_id"])
-
-    # In dev mode, default fallback tenant for rate limit dependency evaluation if unpopulated
-    if os.getenv("DEV_MODE") == "true":
-        return "tenant_alpha"
-
     return None
 
 
 async def verify_rate_limit(request: Request, response: Response) -> Optional[str]:
+    """Debit the authenticated tenant's bucket, or return None for an anonymous request.
+
+    This is an app-level dependency, so it resolves before every route's own auth
+    dependency. It authenticates the principal itself rather than trusting a
+    header: an unauthenticated caller must not be able to choose whose bucket to
+    spend, nor to provoke a 429 ahead of the 401 the route would have returned.
+    """
     path = request.url.path
 
     if (
         not (path.startswith("/v1") or path.startswith("/api/v1"))
         or path in ("/health", "/metrics", "/docs", "/openapi.json", "/redoc", "/v1/webhooks/stripe")
     ):
+        return None
+
+    try:
+        await resolve_active_tenant(request)
+    except HTTPException:
+        # Anonymous or invalid credential. The route's own auth dependency owns
+        # the 401; the limiter simply has nobody to charge.
         return None
 
     tenant_id = extract_tenant_id(request)

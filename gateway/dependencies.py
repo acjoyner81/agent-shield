@@ -10,6 +10,21 @@ from redis import asyncio as aioredis
 
 from gateway.auth import resolve_active_tenant
 
+def require_permission(permission: str):
+    """
+    Dependency factory that enforces a specific permission scope.
+    Returns the permission string if granted, otherwise raises 403 Forbidden.
+    """
+    async def dependency(request: Request):
+        permissions = getattr(request.state, "permissions", None) or set()
+        if permission not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing required permission: {permission}",
+            )
+        return permission
+    return dependency
+
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 TIER_LIMITS = {

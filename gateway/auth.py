@@ -45,7 +45,7 @@ def verify_token_credentials(token: str) -> dict[str, object]:
             return {
                 "sub": "user_dev_123",
                 "https://agentshield.com/tenant_id": "tenant_alpha",
-                "permissions": ["tools:execute", "logs:read"],
+                "permissions": ["tools:execute", "logs:read", "keys:write"],
             }
         if token == "dev-unprivileged-token":
             return {
@@ -92,6 +92,7 @@ def _bind_tenant_state(request: Request, claims: dict[str, object]) -> str:
 
     request.state.tenant_id = tenant_id
     request.state.user_id = user_id
+    request.state.principal_verified = True
 
     permissions = claims.get("permissions", [])
     request.state.permissions = set(permissions) if isinstance(permissions, list) else set()
@@ -119,9 +120,14 @@ def _trace_ids(request: Request) -> tuple[str, str]:
 async def verify_api_key(
     request: Request,
     x_tenant_api_key: Annotated[Optional[str], Header()] = None,
+    *,
     r_client: Optional[redis.Redis] = None,
 ) -> str:
-    """Verify an API key against the hashed store, enforce lifecycle and grace."""
+    """Verify an API key against the hashed store, enforce lifecycle and grace.
+
+    Called directly rather than as a dependency, so the store is a keyword-only
+    injection point and the header stays the single place the key is read.
+    """
     api_key = x_tenant_api_key or request.headers.get("X-Tenant-API-Key")
     if not api_key:
         raise HTTPException(status_code=401, detail="Missing X-Tenant-API-Key header")
@@ -189,6 +195,7 @@ async def verify_api_key(
 
     request.state.tenant_id = tenant_id
     request.state.user_id = key_id
+    request.state.principal_verified = True
     permissions = meta.get("permissions") or []
     request.state.permissions = set(permissions) if isinstance(permissions, list) else set()
 
@@ -196,16 +203,27 @@ async def verify_api_key(
 
 
 async def resolve_active_tenant(request: Request) -> str:
-    """Resolve the authenticated principal: Bearer JWT first, API key fallback."""
+    """Resolve the authenticated principal: Bearer JWT first, API key fallback.
+
+    The app-level rate limiter resolves the principal before the route does, so a
+    credential is verified once per request and the tenant is replayed from the
+    state the first verification bound.
+    """
+    if getattr(request.state, "principal_verified", False) and getattr(request.state, "tenant_id", None):
+        return str(request.state.tenant_id)
+
     auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[len("Bearer "):].strip()
-        claims = verify_token_credentials(token)
-        return _bind_tenant_state(request, claims)
+    if auth_header is not None:
+        scheme, _, token = auth_header.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            # A present-but-unusable Authorization header is a hard failure, never
+            # a reason to fall through to the weaker API key credential.
+            raise _authorization_error("Unsupported or malformed Authorization header")
+        return _bind_tenant_state(request, verify_token_credentials(token.strip()))
 
     api_key = request.headers.get("X-Tenant-API-Key")
     if api_key:
-        return await verify_api_key(request, api_key)
+        return await verify_api_key(request, x_tenant_api_key=api_key)
 
     raise _authorization_error("Not authenticated")
 

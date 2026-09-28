@@ -1,6 +1,7 @@
 """Comprehensive tests for Core LLM Proxy routing, guardrails scanning, and rate-limiting perimeter."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
@@ -133,12 +134,27 @@ class TestRateLimitingGuards:
         assert limit == 60
         assert retry_after == 0
 
-    def test_extract_tenant_id_from_headers(self):
-        """Test tenant identification extraction precedence."""
+    def test_extract_tenant_id_requires_a_verified_principal(self):
+        """Only an authenticated principal has a tenant; headers never supply one.
+
+        The limiter is an app-level dependency, so if it trusted `X-Tenant-ID` or
+        a bare key literal, an anonymous caller would choose which tenant's bucket
+        to spend and could provoke a 429 before the route's 401.
+        """
         mock_req = MagicMock()
         mock_req.state = None
         mock_req.headers = {"X-Tenant-ID": "tenant_header_id"}
-        assert extract_tenant_id(mock_req) == "tenant_header_id"
+        assert extract_tenant_id(mock_req) is None
 
         mock_req.headers = {"X-Tenant-API-Key": "key_alpha_123"}
+        assert extract_tenant_id(mock_req) is None
+
+        # A verified principal is the only source of a tenant id.
+        mock_req.state = SimpleNamespace(
+            tenant_id="tenant_alpha", principal_verified=True
+        )
         assert extract_tenant_id(mock_req) == "tenant_alpha"
+
+        # An unverified binding of a tenant id is still not enough.
+        mock_req.state = SimpleNamespace(tenant_id="tenant_alpha", principal_verified=False)
+        assert extract_tenant_id(mock_req) is None

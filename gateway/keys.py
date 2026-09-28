@@ -13,11 +13,12 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 import redis
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 
 from config.settings import settings
 from gateway.auth import resolve_active_tenant
+from gateway.dependencies import require_permission
 from gateway.telemetry import emit_key_rotation
 
 logger = logging.getLogger("agentshield.keys")
@@ -91,7 +92,7 @@ class APIKeyResponse(BaseModel):
                     "value": {
                         "key_id": "key_9f3ac21b",
                         "name": "ci-pipeline",
-                        "key_prefix": "<masked>",
+                        "key_prefix": "sk_live_••••••••••••unqb",
                         "created_at": "2026-09-24T10:15:00+00:00",
                         "status": "Active",
                         "version": 1,
@@ -175,11 +176,26 @@ async def list_api_keys(
 @router.post("", response_model=APIKeyResponse, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     body: APIKeyCreateRequest,
+    request: Request,
     tenant_id: str = Depends(resolve_active_tenant),
     r_client: redis.Redis = Depends(get_redis_client),
     _perm: str = Depends(require_permission("keys:write")),
 ) -> APIKeyResponse:
-    """Generate a new API key for the tenant, storing only its digest."""
+    """Generate a new API key for the tenant, storing only its digest.
+
+    Key management requires `keys:write`, and a principal may only grant scopes it
+    holds itself, so no credential can mint a successor more privileged than the
+    caller (spec 0012 review blocker).
+    """
+    requested = body.permissions or []
+    granted = getattr(request.state, "permissions", None) or set()
+    escalated = sorted(set(requested) - granted)
+    if escalated:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Cannot grant scopes you do not hold: {', '.join(escalated)}",
+        )
+
     key_id = f"key_{secrets.token_hex(4)}"
     raw_secret = _new_secret()
     created_at = _iso_now()

@@ -12,7 +12,8 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.main import app
+from gateway.keys import _mask_prefix
+from gateway.main import HTTP_METHODS, app
 
 client = TestClient(app)
 
@@ -69,11 +70,6 @@ def test_docs_page_is_public():
     response = client.get("/docs")
     assert response.status_code == 200
     assert "swagger" in response.text.lower()
-
-
-def test_contract_routes_present(schema):
-    """AC-1: the four machine contract routes are described."""
-    assert CONTRACT_PATHS <= set(schema["paths"])
 
 
 def test_every_contract_operation_has_summary_and_tags(schema):
@@ -135,6 +131,46 @@ def test_portal_aliases_excluded(schema):
 def test_published_paths_are_exactly_the_contract(schema):
     """AC-1/AC-5: the published inventory is the contract and nothing else."""
     assert set(schema["paths"]) == CONTRACT_PATHS
+
+
+def test_excluded_routes_leave_no_orphan_components(schema):
+    """AC-5: no component model survives the path filter unreferenced.
+
+    A model nothing points at is a request body or response shape the contract no
+    longer documents but still ships, which is the exclusion rule half-held.
+    """
+    blob = json.dumps(
+        {"paths": schema["paths"], "securitySchemes": schema["components"]["securitySchemes"]}
+    )
+    referenced = set(re.findall(r"#/components/schemas/([A-Za-z0-9_.\-]+)", blob))
+    orphans = set(schema["components"]["schemas"]) - referenced
+    assert not orphans, f"unreferenced component schemas published: {sorted(orphans)}"
+
+    # The checkout model is the concrete case: its route is excluded.
+    assert "CheckoutRequest" not in schema["components"]["schemas"]
+
+
+def test_lifted_examples_keep_their_description(schema):
+    """AC-1: the 'why' written into a component example reaches Swagger UI.
+
+    Pydantic stores `description` on the component example; the media-type copy
+    Swagger actually renders has to carry it, or every authored explanation is
+    dropped at the last step.
+    """
+    described = 0
+    for path_item in schema["paths"].values():
+        for method, op in path_item.items():
+            if method.lower() not in HTTP_METHODS:
+                continue
+            containers = [op.get("requestBody"), *op.get("responses", {}).values()]
+            for container in containers:
+                if not isinstance(container, dict):
+                    continue
+                for media in container.get("content", {}).values():
+                    for example in (media.get("examples") or {}).values():
+                        if example.get("description"):
+                            described += 1
+    assert described > 0, "no published example carries its description"
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +251,10 @@ def test_key_example_does_not_return_a_live_secret(schema):
     """AC-5: the key example shows a masked prefix, not a usable key.
 
     Pydantic omits `None` fields from an example, so the secret is absent rather
-    than null. Either way no usable secret is published.
+    than null. Either way no usable secret is published. The example is also held
+    to the real runtime shape from `_mask_prefix`, so a client written against the
+    docs does not get a string the API never returns.
     """
     example = schema["components"]["schemas"]["APIKeyResponse"]["examples"][0]["value"]
-    assert example["key_prefix"] == "<masked>"
+    assert example["key_prefix"] == _mask_prefix("***REMOVED***")
     assert not example.get("secret_key")

@@ -106,10 +106,9 @@ def test_portal_no_customer_returns_404(mock_portal):
     assert "No Stripe customer" in response.json()["detail"]
 
 
-@patch("gateway.billing.redis.Redis.get")
 @patch("gateway.billing.stripe.billing_portal.Session.create")
-def test_portal_returns_url(mock_portal, mock_redis_get):
-    mock_redis_get.return_value = "cus_123"
+def test_portal_returns_url(mock_portal, fake_redis):
+    fake_redis.set("tenant:tenant_alpha:stripe_customer_id", "cus_123")
     mock_portal.return_value = type("P", (), {"url": "https://billing.stripe.com/portals/123"})
 
     response = client.post("/v1/billing/portal", headers=CLIENT_HEADERS)

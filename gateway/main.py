@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import requests
 import uuid
@@ -14,7 +15,6 @@ from datetime import datetime
 import redis
 from redis import asyncio as aioredis
 from fastapi import Depends, FastAPI, HTTPException, Header, Request, status
-from fastapi.security import APIKeyHeader, HTTPBearer
 from pydantic import BaseModel, ConfigDict
 
 from config.settings import settings
@@ -35,14 +35,15 @@ either a user Bearer token or a tenant machine key.
 **Authentication**
 
 * `Authorization: Bearer <JWT>` authenticates a user principal.
-* `X-Tenant-API-Key: <key>` authenticates a machine principal. Create keys from the
-  portal, or with `POST /v1/keys`.
+* `X-Tenant-API-Key: <key>` authenticates a machine principal. Keys are managed from
+  the portal; `POST /v1/keys` additionally requires the `keys:write` scope, and a key
+  can only be granted scopes its creator already holds.
 * When both are sent, the **Bearer token wins** and the API key is ignored, mirroring
   `resolve_active_tenant` in `gateway/auth.py`.
 
 **Tenant resolution**
 
-A caller supplied `X-Tenant-ID` header is **never authoritative** and is ignored. The
+A caller-supplied `X-Tenant-ID` header is **never authoritative** and is ignored. The
 tenant always comes from the verified JWT claim `https://agentshield.com/tenant_id` or
 from the key store, so you cannot act on behalf of another tenant by setting a header.
 
@@ -75,8 +76,10 @@ app.include_router(keys_router, prefix="/api")
 r = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 API_KEY_NAME = "X-Tenant-API-Key"
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
-bearer_scheme = HTTPBearer(auto_error=False)
+
+# Only these keys are HTTP operations in a Path Item Object; `parameters`,
+# `summary`, and friends are dicts too and must never be stamped as operations.
+HTTP_METHODS = frozenset({"get", "put", "post", "delete", "options", "head", "patch", "trace"})
 
 TENANT_CONFIG = {
     "key_alpha_123": {"tenant_id": "tenant_alpha", "rate_limit_rpm": 60, "daily_budget_usd": 50.0},
@@ -280,7 +283,7 @@ def custom_openapi():
             "bearerFormat": "JWT",
             "description": (
                 "User authentication via an Auth0 access token. The tenant is read from "
-                "the verified `https://agentshield.com/tenant_id` claim; a caller supplied "
+                "the verified `https://agentshield.com/tenant_id` claim; a caller-supplied "
                 "`X-Tenant-ID` header is never authoritative and is ignored. When this "
                 "header is present alongside `X-Tenant-API-Key`, this token takes precedence."
             ),
@@ -291,19 +294,22 @@ def custom_openapi():
             "name": "X-Tenant-API-Key",
             "description": (
                 "Machine authentication via a hashed tenant key. The tenant is read from the "
-                "key store; a caller supplied `X-Tenant-ID` header is never authoritative and "
+                "key store; a caller-supplied `X-Tenant-ID` header is never authoritative and "
                 "is ignored. Used only when no `Authorization: Bearer` header is present."
             ),
         }
     }
     
     # Apply schemes to all remaining routes
-    for path in openapi_schema["paths"].values():
-        for method in path.values():
-            if isinstance(method, dict):
-                method["security"] = [{"bearer": []}, {"apiKey": []}]
+    for path_item in openapi_schema["paths"].values():
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method.lower() in HTTP_METHODS and isinstance(operation, dict):
+                operation["security"] = [{"bearer": []}, {"apiKey": []}]
 
     _lift_schema_examples(openapi_schema)
+    _prune_orphan_components(openapi_schema)
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema
@@ -352,11 +358,37 @@ def _media_examples(resolved: tuple[str, bool], schemas: dict) -> dict:
         if not isinstance(ex, dict):
             continue
         value = ex.get("value")
-        lifted[name] = {
+        lifted_example = {
             "summary": ex.get("summary", name),
             "value": [value] if is_array and not isinstance(value, list) else value,
         }
+        if ex.get("description"):
+            lifted_example["description"] = ex["description"]
+        lifted[name] = lifted_example
     return lifted
+
+
+def _referenced_component_names(schema: dict) -> set[str]:
+    """Collect every component schema name still reachable from the published paths."""
+    blob = json.dumps(
+        {"paths": schema.get("paths", {}), "securitySchemes": schema.get("components", {}).get("securitySchemes", {})}
+    )
+    return set(re.findall(r"#/components/schemas/([A-Za-z0-9_.\-]+)", blob))
+
+
+def _prune_orphan_components(schema: dict) -> None:
+    """Drop component schemas no published operation references.
+
+    Excluding a path leaves its request and response models behind, and an
+    unreferenced model in a published contract is a route in all but name.
+    """
+    schemas = schema.get("components", {}).get("schemas")
+    if not schemas:
+        return
+    referenced = _referenced_component_names(schema)
+    for name in list(schemas.keys()):
+        if name not in referenced:
+            del schemas[name]
 
 
 def _lift_schema_examples(schema: dict) -> None:
@@ -369,23 +401,16 @@ def _lift_schema_examples(schema: dict) -> None:
     schemas = schema.get("components", {}).get("schemas", {})
 
     for path_item in schema.get("paths", {}).values():
-        for operation in path_item.values():
-            if not isinstance(operation, dict):
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method.lower() not in HTTP_METHODS or not isinstance(operation, dict):
                 continue
 
-            body = operation.get("requestBody")
-            if body:
-                for media in body.get("content", {}).values():
-                    if not isinstance(media, dict):
-                        continue
-                    resolved = _resolve_ref(media.get("schema") or {})
-                    if resolved and (examples := _media_examples(resolved, schemas)):
-                        media["examples"] = examples
-
-            for response in operation.get("responses", {}).values():
-                if not isinstance(response, dict):
+            for container in [operation.get("requestBody"), *operation.get("responses", {}).values()]:
+                if not isinstance(container, dict):
                     continue
-                for media in response.get("content", {}).values():
+                for media in container.get("content", {}).values():
                     if not isinstance(media, dict):
                         continue
                     resolved = _resolve_ref(media.get("schema") or {})

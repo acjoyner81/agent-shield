@@ -90,9 +90,14 @@ export class KeysComponent implements OnInit {
   readonly keysService = inject(KeysService);
   readonly newlyCreatedSecret = signal<string | null>(null);
 
-  /** The gateway is published on port 8000; /docs and /openapi.json live at its root. */
-  readonly gatewayUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
-  readonly docsUrl = `${this.gatewayUrl}/docs`;
+  /**
+   * The portal talks to the gateway through its own origin, exactly as
+   * `KeysService` does. nginx forwards `/api/` to the gateway and strips the
+   * prefix, so `/api/docs` and `/api/openapi.json` reach the published contract
+   * in every topology, including a staged one behind TLS termination.
+   */
+  readonly gatewayUrl = `${window.location.origin}/api`;
+  readonly docsUrl = `${window.location.origin}/api/docs`;
 
   ngOnInit(): void {
     this.keysService.fetchKeys();

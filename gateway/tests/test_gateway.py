@@ -1,5 +1,6 @@
 import os
-from unittest.mock import MagicMock, AsyncMock, patch
+import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,13 +91,10 @@ def test_telemetry_logs_post_splunk_failure(mock_redis):
 
 
 
-def test_chat_completions_budget_exceeded(mock_redis):
+def test_chat_completions_budget_exceeded(fake_redis):
     """Verify /v1/chat/completions returns 402 when daily budget exceeded."""
-    def mock_get(key):
-        if key.startswith("budget:"):
-            return "100.0"
-        return None
-    mock_redis.get.side_effect = mock_get
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    fake_redis.set(f"budget:tenant_alpha:{today}", "100.0")
     with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
         response = client.post(
             "/v1/chat/completions",
@@ -110,7 +108,7 @@ def test_chat_completions_budget_exceeded(mock_redis):
 
 
 
-def test_chat_completions_rate_limit(mock_redis):
+def test_chat_completions_rate_limit(fake_redis):
     """Verify /v1/chat/completions enforces rate limit."""
     with patch("gateway.rate_limit.check_token_bucket", return_value=(False, 0, 60, 60, 10)), \
          patch("gateway.rate_limit.emit_rate_limit_exceeded"), \

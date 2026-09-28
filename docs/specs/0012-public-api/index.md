@@ -45,17 +45,26 @@ The published machine contract is these four existing routes, already verified b
 |---|---|---|---|---|
 | /v1/chat/completions | POST | Bearer, X-Tenant-API-Key | none (quota gate) | yes |
 | /v1/tools/execute | POST | Bearer, X-Tenant-API-Key | tools:execute | yes |
-| /v1/usage/summary | GET | Bearer, X-Tenant-API-Key | none (tenant scoped) | yes |
-| /v1/keys | GET, POST, DELETE | Bearer, X-Tenant-API-Key | none (tenant scoped) | yes |
+| /v1/usage/summary | GET | Bearer, X-Tenant-API-Key | none (tenant scoped; cost fields need billing:admin) | yes |
+| /v1/keys | GET | Bearer, X-Tenant-API-Key | none (tenant scoped) | yes |
+| /v1/keys | POST, DELETE; /v1/keys/{key_id}/rotate | Bearer, X-Tenant-API-Key | keys:write | yes |
 
 Operational routes excluded from the schema, via `include_in_schema=False` and a path filter in `custom_openapi`: `/health`, the `/api/v1/*` portal aliases, `/v1/billing/webhook`, `/v1/billing/checkout`, `/v1/billing/portal`, and the telemetry logs ingest surface.
 
 **Machine access on all four routes**: the contract table promises a key on every route, so
 `/v1/keys` and `/v1/usage/summary` authenticate through `resolve_active_tenant` (Bearer, else key)
 rather than `get_verified_tenant` (JWT only). This is a deliberate widening: a machine key can now
-read its own usage and manage keys. Accepted because the contract is the published promise, and a
-key already grants the tenant's own data plus any scopes it carries; key creation remains the
-portal's single surface and no key can mint a key outside the tenant it belongs to.
+read its own usage. Key management is narrower than the rest, because writing credentials is the
+one operation that can widen a principal's own reach:
+
+- `POST /v1/keys`, `POST /v1/keys/{key_id}/rotate`, and `DELETE /v1/keys/{key_id}` require the
+  `keys:write` scope, and
+- `POST /v1/keys` only grants scopes the caller already holds, so no credential can mint a
+  successor more privileged than itself (rejected with `403 Cannot grant scopes you do not hold`).
+
+A key that holds `keys:write` therefore manages keys for its own tenant, within its own scopes. It
+can never widen them. Key creation is no longer "the portal's single surface"; it is the portal
+plus any credential holding `keys:write`, which the published schema now states.
 
 **Value sourcing** (every value the schema produces names its source):
 
@@ -71,9 +80,11 @@ portal's single surface and no key can mint a key outside the tenant it belongs 
 | Schema test | assertions on routes, schemes, examples | the generated `app.openapi()` dict at test time |
 
 **Key invariants**:
-- The public schema never contains an internal route or a real credential.
+- The public schema never contains an internal route, an unreferenced component model, or a real credential.
 - The precedence rule documented in the schema matches the runtime, otherwise the docs lie.
+- The `X-Tenant-ID` rule holds at the limiter too: no bucket is debited and no `429` is raised for a request that has not authenticated.
 - Every contract route works with the API key at runtime, not only in the schema, which the regression tests keep true.
+- No credential can grant a scope it does not already hold.
 
 **Security model**:
 The schema is public and read only. It exposes endpoint shapes and error codes, no tenant data and no secrets. Authentication stays exactly as shipped: JWT for users, hashed API keys for machines, default deny permission checks on routed scopes. Making `/docs` public is the scope's own acceptance bar and accelerates developer onboarding; the blast radius of a public schema is an endpoint inventory, which the operational exclusions keep minimal.
@@ -90,6 +101,8 @@ None. No new environment variables or credentials.
 - Tenant source: a valid key plus a spoofed `X-Tenant-ID` still binds the store tenant, verifies **AC-3**
 - Lifecycle: a revoked machine key is rejected on the contract routes, verifies **AC-4**
 - Secrets: scanning the generated schema finds no example that looks like a live secret or token, verifies **AC-5**
+- Escalation: a key with no scopes gets `403` on `POST /v1/keys`, and a key holding only `keys:write` gets `403` when it asks for a `billing:admin` key, verifies **AC-4**
+- Limiter: an anonymous request carrying a spoofed `X-Tenant-ID` writes no `rate_limit:*` state, and an exhausted victim bucket still yields `401` rather than `429`, verifies **AC-3**
 
 ## Build plan
 
@@ -117,11 +130,11 @@ Ordered as thin vertical slices per the project default (Tracer Bullet), getting
 
 **Neutral**:
 - `/docs` was already reachable; this feature makes it intentional.
-- The key creation surface stays in the portal; no programmatic key onboarding endpoint is added in this slice.
+- Key management is no longer portal-only: any credential holding `keys:write` can manage keys, bounded by its own scopes.
 
 ## Follow-up
 
-- [ ] Consider a programmatic key onboarding endpoint later; deliberately deferred so the portal stays the single creation surface.
+- [ ] Consider a programmatic key onboarding endpoint later; deliberately deferred so key creation stays behind `keys:write`.
 - [ ] Add a developer docs page in the portal for larger integrations; the quick start note is the MVP seed.
 
 ## Rationale
