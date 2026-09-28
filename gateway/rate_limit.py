@@ -105,10 +105,6 @@ def extract_tenant_id(request: Request) -> Optional[str]:
         if api_key in TENANT_CONFIG:
             return str(TENANT_CONFIG[api_key]["tenant_id"])
 
-    tenant_header = request.headers.get("X-Tenant-ID")
-    if tenant_header:
-        return str(tenant_header)
-
     # In dev mode, default fallback tenant for rate limit dependency evaluation if unpopulated
     if os.getenv("DEV_MODE") == "true":
         return "tenant_alpha"

@@ -177,6 +177,7 @@ async def create_api_key(
     body: APIKeyCreateRequest,
     tenant_id: str = Depends(resolve_active_tenant),
     r_client: redis.Redis = Depends(get_redis_client),
+    _perm: str = Depends(require_permission("keys:write")),
 ) -> APIKeyResponse:
     """Generate a new API key for the tenant, storing only its digest."""
     key_id = f"key_{secrets.token_hex(4)}"
@@ -232,6 +233,7 @@ async def rotate_api_key(
     body: Optional[RotateKeyRequest] = None,
     tenant_id: str = Depends(resolve_active_tenant),
     r_client: redis.Redis = Depends(get_redis_client),
+    _perm: str = Depends(require_permission("keys:write")),
 ) -> APIKeyResponse:
     """Rotate a key: mark it Rotated with a grace window and mint a successor.
 
@@ -318,6 +320,7 @@ async def revoke_api_key(
     key_id: str,
     tenant_id: str = Depends(resolve_active_tenant),
     r_client: redis.Redis = Depends(get_redis_client),
+    _perm: str = Depends(require_permission("keys:write")),
 ):
     """Revoke a key immediately, persisting it as a Revoked tombstone."""
     meta = _read_meta(r_client, tenant_id, key_id)
