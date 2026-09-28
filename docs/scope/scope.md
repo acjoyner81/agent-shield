@@ -162,7 +162,7 @@ Expose the FastAPI OpenAPI documentation and provide a way for tenants to genera
    - [x] Lock the contract with schema and machine access tests
 - [x] Verify it: `/check verify public api`
 - [x] Test it: `/test public api`
-- [ ] Review it: `/check review public api`
+- [x] Review it: `/check review public api` — run 2026-09-28, verdict Blocked. 2 blockers, 3 major. Findings in `docs/reviews/2026-09-28-public-api.md`.
 Spec 0012 · `docs/specs/0012-public-api/index.md` · code in `gateway/main.py`, `gateway/keys.py`, `gateway/metering.py`
 
 ### 10. API Key Rotation · in-progress · GA
