@@ -49,7 +49,11 @@ build/
 redis-data/
 postgres-data/
 qdrant-data/
-logs/
+# Anchored to the repo root. A bare `logs/` matches any directory named logs at
+# any depth, which silently excluded portal-frontend/src/app/features/logs/ —
+# the observability page was never committed, so changes to it showed up as
+# nothing in git status.
+/logs/
 coverage/
 reports/
 *.log

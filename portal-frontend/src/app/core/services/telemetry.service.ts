@@ -1,6 +1,8 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 
+import { SILENT_POLL } from '../errors/surface.context';
+
 export interface TelemetryLog {
   eventId: string;
   timestamp: string;
@@ -57,13 +59,19 @@ export class TelemetryService {
 
   readonly usage = signal<UsageSummary | null>(null);
   readonly health = signal<ServiceHealthResponse | null>(null);
-  readonly logs = signal<TelemetryLog[]>([
-    { eventId: 'EVT-1030', timestamp: 'Today, 10:42:18', tenantId: 'northstar-labs', costUsd: 0.0038, statusCode: 429, latencyMs: 12, evalPassed: true, traceId: 'dt-7fa2c1' },
-    { eventId: 'EVT-1029', timestamp: 'Today, 10:41:56', tenantId: 'harbor-works', costUsd: 0.0182, statusCode: 200, latencyMs: 142, evalPassed: true, traceId: 'dt-7fa2af' },
-    { eventId: 'EVT-1028', timestamp: 'Today, 10:41:11', tenantId: 'northstar-labs', costUsd: 0.0114, statusCode: 200, latencyMs: 86, evalPassed: true, traceId: 'dt-7fa1d9' },
-    { eventId: 'EVT-1027', timestamp: 'Today, 10:40:44', tenantId: 'pinnacle-care', costUsd: 0.0061, statusCode: 500, latencyMs: 934, evalPassed: false, traceId: 'dt-7fa19b' },
-    { eventId: 'EVT-1026', timestamp: 'Today, 10:39:58', tenantId: 'harbor-works', costUsd: 0.0027, statusCode: 200, latencyMs: 64, evalPassed: true, traceId: 'dt-7fa0e0' },
-  ]);
+  /**
+   * Starts empty.
+   *
+   * This used to be seeded with five hardcoded `EVT-*` rows so the page had
+   * something to render. Because every fetch failure kept the previous values, a
+   * tenant with the gateway down saw a complete, plausible, entirely fictional
+   * audit stream. An observability product asserting events that never happened
+   * is worse than one admitting it has none, so the empty state is the fix.
+   */
+  readonly logs = signal<TelemetryLog[]>([]);
+
+  /** True once a fetch has succeeded at least once, so empty can mean either thing. */
+  readonly logsLoaded = signal(false);
 
   readonly totalSpend = computed(() => this.logs().reduce((sum, log) => sum + log.costUsd, 0));
   readonly failedRequests = computed(() => this.logs().filter((log) => log.statusCode === 429 || log.statusCode >= 500).length);
@@ -90,25 +98,38 @@ export class TelemetryService {
 
   constructor(private readonly http: HttpClient) {}
 
+  /**
+   * All three are background polls. Every 60 seconds the dashboard refetches
+   * them, so a policy that interrupted would emit a notice roughly every 30
+   * seconds to a user who did nothing. A failure marks the widget stale and
+   * keeps the last known figures, with a quiet "last updated N ago" note.
+   */
   fetchRecentLogs(): void {
-    this.http.get<TelemetryLog[]>(`${this.apiUrl}/logs`).subscribe({
-      next: (data) => this.logs.set(data),
-      error: (err) => console.warn('Failed to fetch telemetry logs', err),
+    this.http.get<TelemetryLog[]>(`${this.apiUrl}/logs`, { context: SILENT_POLL }).subscribe({
+      next: (data) => {
+        this.logs.set(data);
+        this.logsLoaded.set(true);
+      },
+      // Already classified and reported by the interceptor; see keys.service.ts
+      // for why the handler is present but empty.
+      error: () => undefined,
     });
   }
 
   fetchUsageSummary(): void {
-    this.http.get<UsageSummary>('/api/v1/usage/summary').subscribe({
+    this.http.get<UsageSummary>('/api/v1/usage/summary', { context: SILENT_POLL }).subscribe({
       next: (data) => this.usage.set(data),
-      error: (err) => console.warn('Failed to fetch usage summary', err),
+      error: () => undefined,
     });
   }
 
   fetchServiceHealth(): void {
-    this.http.get<ServiceHealthResponse>('/api/v1/health/services').subscribe({
-      next: (data) => this.health.set(data),
-      error: (err) => console.warn('Failed to fetch service health', err),
-    });
+    this.http
+      .get<ServiceHealthResponse>('/api/v1/health/services', { context: SILENT_POLL })
+      .subscribe({
+        next: (data) => this.health.set(data),
+        error: () => undefined,
+      });
   }
 
   /** Manual refresh: pull both dashboard signals now (Spec 0011 AC-5). */

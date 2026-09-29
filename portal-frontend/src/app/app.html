@@ -15,10 +15,22 @@
       <a routerLink="/pricing" routerLinkActive="active"><span class="nav-icon">◈</span>Plans & billing</a>
       <a href="javascript:void(0)"><span class="nav-icon">?</span>Help center</a>
     </nav>
-    <div class="sidebar-footer"><div class="status-line"><b></b>All systems operational</div><div class="profile"><span class="profile-avatar">AJ</span><span><strong>{{ auth.userName() }}</strong><small>Workspace owner</small></span><span class="more">•••</span></div></div>
+    <!--
+      Health is computed from /v1/health/services, never asserted. These two
+      used to be hardcoded "All systems operational" and "Systems normal" with no
+      request behind them, so the shell claimed health on every page while the
+      dashboard computed the real status for the same tenant (Spec 0013).
+    -->
+    <div class="sidebar-footer"><div class="status-line" [class.status-line--stale]="healthStale()"><b></b>{{ healthLabel() }}</div><div class="profile"><span class="profile-avatar">AJ</span><span><strong>{{ auth.userName() }}</strong><small>Workspace owner</small></span><span class="more">•••</span></div></div>
   </aside>
   <main class="main-content">
-    <header class="topbar"><button class="mobile-menu" type="button">☰</button><div class="breadcrumbs"><span>AgentShield</span><b>/</b><strong>{{ pageTitle | async }}</strong></div><div class="top-actions"><span class="top-status"><b></b> Systems normal</span><button class="top-icon" aria-label="Notifications">♢<i></i></button><button class="top-help">?</button></div></header>
+    <header class="topbar"><button class="mobile-menu" type="button">☰</button><div class="breadcrumbs"><span>AgentShield</span><b>/</b><strong>{{ pageTitle | async }}</strong></div><div class="top-actions"><span class="top-status" [class.top-status--stale]="healthStale()"><b></b> {{ healthLabel() }}</span><button class="top-icon" aria-label="Notifications">♢<i></i></button><button class="top-help">?</button></div></header>
     <div class="content-wrap"><router-outlet /></div>
   </main>
+  <!--
+    The single app level host for gateway notices. It lives in the shell rather
+    than in each feature so a failure cannot be missed because the user is on
+    the wrong page (Spec 0013).
+  -->
+  <app-notification-center />
 </div>
