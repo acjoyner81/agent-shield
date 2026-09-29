@@ -38,9 +38,14 @@ import { KeysService, APIKey } from '../../core/services/keys.service';
         <p class="eyebrow">Protection status</p>
         <h2>Guardrails active</h2>
         <div class="guardrail"><span><b class="dot green-dot"></b>Prompt injection filter</span><strong>Enabled</strong></div>
-        <div class="guardrail"><span><b class="dot green-dot"></b>PII redaction</span><strong>Enabled</strong></div>
+        <div class="guardrail"><span><b class="dot yellow-dot"></b>PII redaction</span><strong>Not applied</strong></div>
         <div class="guardrail"><span><b class="dot green-dot"></b>Budget enforcement</span><strong>Enabled</strong></div>
         <div class="guardrail"><span><b class="dot yellow-dot"></b>OIDC enforcement</span><strong>Review</strong></div>
+        <p class="small-note" style="margin: 12px 0 0;">
+          PII redaction is <b>not applied to request or response traffic</b>. The gateway
+          ships the helpers but the request path never calls them, so prompts reach the
+          model as sent. Do not send personal data until this row reads Enabled.
+        </p>
       </article>
     </section>
 
