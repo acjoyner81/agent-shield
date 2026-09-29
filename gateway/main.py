@@ -533,19 +533,14 @@ async def get_telemetry_logs(
                     "traceId": item.get("trace_id", ""),
                 }
             )
-        if history:
-            return history[-50:]
+        return history[-50:]
     except Exception:
-        pass
+        logger.exception("telemetry history read failed for tenant %s", tenant_id)
 
-    # Fallback demo rows for the portal until real tenant history flows
-    return [
-        {"eventId": "EVT-1030", "timestamp": "Today, 10:42:18", "tenantId": "northstar-labs", "costUsd": 0.0038, "statusCode": 429, "latencyMs": 12, "evalPassed": True, "traceId": "dt-7fa2c1"},
-        {"eventId": "EVT-1029", "timestamp": "Today, 10:41:56", "tenantId": "harbor-works", "costUsd": 0.0182, "statusCode": 200, "latencyMs": 142, "evalPassed": True, "traceId": "dt-7fa2af"},
-        {"eventId": "EVT-1028", "timestamp": "Today, 10:41:11", "tenantId": "northstar-labs", "costUsd": 0.0114, "statusCode": 200, "latencyMs": 86, "evalPassed": True, "traceId": "dt-7fa1d9"},
-        {"eventId": "EVT-1027", "timestamp": "Today, 10:40:44", "tenantId": "pinnacle-care", "costUsd": 0.0061, "statusCode": 500, "latencyMs": 934, "evalPassed": False, "traceId": "dt-7fa19b"},
-        {"eventId": "EVT-1026", "timestamp": "Today, 10:39:58", "tenantId": "harbor-works", "costUsd": 0.0027, "statusCode": 200, "latencyMs": 64, "evalPassed": True, "traceId": "dt-7fa0e0"},
-    ]
+    # An honest empty list. This used to return five hardcoded "demo" rows, which
+    # were not merely invented: they carried tenant ids belonging to other
+    # tenants, so a tenant with no history was shown another tenant's events.
+    return []
 
 
 @app.post("/v1/telemetry/logs", include_in_schema=False)
@@ -622,8 +617,19 @@ async def process_llm_request(
     calculated_cost = 0.003
     budget_key = f"budget:{tenant_id}:{time.strftime('%Y-%m-%d', time.gmtime())}"
     current_spend = float(r.get(budget_key) or 0.0)
-    if current_spend + calculated_cost > float(tenant_info["daily_budget_usd"]):
-        raise HTTPException(status_code=402, detail="Tenant daily budget exceeded")
+    max_budget = float(tenant_info["daily_budget_usd"])
+    if current_spend + calculated_cost > max_budget:
+        # Same three keys `llm_proxy.completion_proxy` raises (Spec 0013), so both
+        # "budget exhausted" paths tell the portal the same story. Both figures are
+        # already in scope from the reads above.
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "Tenant budget limit exceeded",
+                "current_spend_usd": current_spend,
+                "max_budget_usd": max_budget,
+            },
+        )
 
     mock_llm_response = {
         "text": f"Processed query: '{effective_prompt}'",

@@ -102,7 +102,11 @@ def test_chat_completions_budget_exceeded(fake_redis):
             json={"prompt": "Test query"},
         )
     assert response.status_code == 402
-    assert "daily budget exceeded" in response.json()["detail"]
+    # The detail is a dict since Spec 0013, carrying the figures the portal needs
+    # to tell a tenant how far over budget they are.
+    detail = response.json()["detail"]
+    assert detail["error"] == "Tenant budget limit exceeded"
+    assert detail["current_spend_usd"] == 100.0
 
 
 
