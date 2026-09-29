@@ -23,6 +23,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 9 | Admin Dashboard | Slice 4 | in-progress |
 | 10 | Public API | Slice 4 | done |
 | 11 | API Key Rotation | Slice 4 | in-progress |
+| 12 | UI Error Handling | Slice 4 | in-progress |
 
 ## Foundations
 
@@ -179,6 +180,20 @@ Give machine access a real credential lifecycle: hashed storage, rotation with a
 - [x] Test it: `/test api key rotation`
 - [x] Review it: `/check review api key rotation`
 Spec 0010 · `docs/specs/0010-api-key-rotation/index.md` · code in `gateway/keys.py`, `gateway/auth.py`
+
+### 11. UI Error Handling · in-progress
+Make every gateway refusal visible and correctly placed, and stop the portal from rendering invented telemetry when a fetch fails.
+**Done when:** a 402, 429, or 403 is named on screen with the right surface, a failed background poll marks its widget stale instead of interrupting, and no seeded rows or hardcoded metrics remain.
+- [x] Design it (spec): `/architect ui error handling` → Spec 0013
+- [ ] Build it: `/develop ui error handling`
+   - [ ] Add the pure classifier and the typed `GatewayError` model, exhaustive over the six kinds
+   - [ ] Add the signal store and the app level container with live region announcements
+   - [ ] Wire the interceptor after Auth0, scoped to `/api/v1/`, and declare `SURFACE` on every call site
+   - [ ] Replace the `console.warn` and `error: () => undefined` handlers, drop the seeded rows and hardcoded log metrics
+   - [ ] Enrich the portal facing 402 with the spend and cap figures
+- [ ] Verify it: `/check verify ui error handling`
+- [ ] Test it: `/test ui error handling`
+Spec 0013 · `docs/specs/0013-ui-error-handling/index.md` · code in `portal-frontend/src/app/core/errors/`, `portal-frontend/src/app/core/services/`, `gateway/main.py`
 
 ## Deferred
 Out of scope for the current build pass, kept so the plan stays honest.
