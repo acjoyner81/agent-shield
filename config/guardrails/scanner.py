@@ -13,7 +13,13 @@ PROMPT_INJECTION_PATTERNS = [
     r"(?i)\bdump\s+(?:environment\s+variables|env\s+(?:variables?|vars?)|secrets|credentials|api\s+keys?)\b",
     r"(?i)override\s+system\s+prompt",
     r"(?i)\bgenerate\s+(?:malicious\s+|exploit\s+|working\s+)?(?:exploit\s+)?code\b",
-    r"(?i)\bjailbreak\b",
+    # "Jailbreak" is an ordinary English word (a video game genre, a DRM term), so
+    # matching it bare refused benign traffic. Require it in an attacking sense:
+    # aimed at the model or assistant, or named as a scenario or attempt.
+    r"(?i)\bjailbreak\s+(?:the\s+|this\s+|your\s+|my\s+)?(?:model|assistant|ai|llm|chatbot|system|prompt|guardrails?)\b",
+    r"(?i)\b(?:jailbreak|jail\s?break)\s+(?:attempt|prompt|scenario|mode|style|technique|instructions?)\b",
+    r"(?i)\b(?:this|that|is)\s+(?:is\s+)?(?:a\s+|an\s+)?(?:jailbreak|jail\s?break)\b",
+    r"(?i)^\s*(?:jailbreak|jail\s?break)\b",
 ]
 
 # Regex patterns for detecting sensitive PII
