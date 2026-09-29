@@ -39,11 +39,12 @@ We use a structured workflow to ensure technical consistency:
 - [x] Implemented Granular RBAC Enforcement with Auth0 permissions verification (`require_permission` dependency, Spec 0005)
 - [x] Implemented Tenant Token Bucket Rate Limiting & Isolation (`verify_rate_limit` dependency, Spec 0006)
 - [x] Implemented Usage Metering Engine (`/v1/usage/summary`, roll-up aggregation, and DLQ routing, Spec 0009)
-- [x] Comprehensive test suites for proxy routing, guardrails filters, rate limiting, and metering (233 tests passing, hermetic against fakeredis)
+- [x] Comprehensive test suites for proxy routing, guardrails filters, rate limiting, and metering (237 tests passing, hermetic against fakeredis)
 - [x] Implemented API Key Rotation (hashed store, digest index, rotate with grace window, revocation tombstones, Spec 0010)
 - [x] Implemented Admin Dashboard (per service health probes, tenant quality/failure/rate counters, Spec 0011)
 - [x] Implemented the curated Public API surface (six contract paths at `/docs`, Bearer over key precedence, machine keys on all four contract routes, Spec 0012)
 - [x] Remediated the Blocked 0012 review: key writes need `keys:write` and can only grant scopes the caller holds, and the rate limiter no longer trusts a pre-auth `X-Tenant-ID`
+- [x] Made the metering DLQ redrivable: the dedup claim and the roll-up are one atomic Redis script, so a failed event no longer stays claimed and dies as a false duplicate (237 tests passing)
 - [ ] Implement real billing integration (Stripe)
 - [ ] Implement real telemetry aggregation from Redis $\rightarrow$ Splunk
 - [ ] Build out the Java Gateway core logic
@@ -54,6 +55,7 @@ We use a structured workflow to ensure technical consistency:
 - The portal dashboard sits behind the stock Auth0 `authGuardFn` with no dev bypass, so driving the UI in a browser needs a real Auth0 account in `dev-zymaiayb0afkpn7n`. The API it calls is reachable without a browser.
 - Key writes are the one credential operation that can widen a principal's reach, so `POST /v1/keys` requires the `keys:write` scope *and* only grants scopes the caller already holds. A machine key is a real principal, not a lesser one: it manages keys for its own tenant but can never mint a successor more privileged than itself.
 - The rate limiter is an app-level dependency, so it runs before route auth. It therefore resolves the principal itself (`request.state.principal_verified`, memoized by `resolve_active_tenant`) rather than reading `X-Tenant-ID` or a literal key table; a pre-auth caller can neither debit a bucket nor learn a tenant's budget from a status code.
+- Metering claims an event in `usage:processed_events` and applies its roll-up in one Redis script, because claiming first and writing second stranded a failed event in the ledger, which made the DLQ entry it was routed to redrive as a duplicate and drop the usage permanently. The scripts type check every key before the claim so a rejected event leaves nothing behind. That means the test suite needs `fakeredis[lua]`; install `requirements-dev.txt` or `eval` fails and every metering test fails with it.
 
 ## Project Memory
 For quick recall of recent changes, refer to the git history or the `docs/progress.md` (if created).

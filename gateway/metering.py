@@ -128,11 +128,11 @@ def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) 
         if not event_id or not tenant_id:
             raise ValueError("Missing required event_id or tenant_id")
 
-        # 1. Deduplication check via Redis set
-        is_new = r_client.sadd("usage:processed_events", event_id)
-        if not is_new:
-            logger.info(f"Duplicate token event {event_id} skipped.")
-            return True
+        # 1. Claim the event and apply the roll-up in a single atomic step, so a
+        # duplicate is dropped and a failure leaves nothing behind to redrive.
+        timestamp_str = event.get("timestamp") or datetime.now(timezone.utc).isoformat()
+        usage_date = timestamp_str[:10]
+        usage_month = timestamp_str[:7]
 
         # 2. Extract metrics
         data = event.get("data", {})
@@ -142,25 +142,22 @@ def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) 
         total_tokens = int(tokens.get("total", input_tokens + output_tokens))
         model = str(tokens.get("model", "default"))
 
-        timestamp_str = event.get("timestamp") or datetime.now(timezone.utc).isoformat()
-        usage_date = timestamp_str[:10]
-        usage_month = timestamp_str[:7]
-
         # 3. Update roll-up aggregates
-        daily_key = f"usage:daily:{tenant_id}:{usage_date}:{model}"
-        r_client.hincrby(daily_key, "input_tokens", input_tokens)
-        r_client.hincrby(daily_key, "output_tokens", output_tokens)
-        r_client.hincrby(daily_key, "total_tokens", total_tokens)
-        r_client.hincrby(daily_key, "request_count", 1)
-
-        # Track models used by tenant
-        r_client.sadd(f"usage:models:{tenant_id}:{usage_date}", model)
-
-        # Update billing tracking for Stripe sync
-        billing_key = f"billing:usage:{tenant_id}:{usage_month}"
-        r_client.hincrby(billing_key, "total_tokens", total_tokens)
-        r_client.hincrby(billing_key, "request_count", 1)
-
+        applied = r_client.eval(
+            _APPLY_TOKEN_USAGE,
+            4,
+            "usage:processed_events",
+            f"usage:daily:{tenant_id}:{usage_date}:{model}",
+            f"usage:models:{tenant_id}:{usage_date}",
+            f"billing:usage:{tenant_id}:{usage_month}",
+            event_id,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            model,
+        )
+        if not applied:
+            logger.info(f"Duplicate token event {event_id} skipped.")
         return True
 
     except Exception as exc:
@@ -170,6 +167,50 @@ def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) 
         except Exception:
             pass
         return False
+
+
+# A CloudEvent's dedup claim and its roll-up writes must land together or not at
+# all. Claiming first and writing second let a failure in between strand the
+# event in the ledger with the aggregate unwritten, so the DLQ entry it was
+# routed to redrived as a duplicate and the usage was lost for good. These
+# scripts type check every key they touch before the claim, then claim and
+# write in one step, so a rejected event leaves no trace and redrives cleanly.
+_APPLY_TOKEN_USAGE = """
+local ledger, daily, models, billing = KEYS[1], KEYS[2], KEYS[3], KEYS[4]
+local kinds = {redis.call('TYPE', ledger).ok, redis.call('TYPE', daily).ok,
+               redis.call('TYPE', billing).ok}
+for i = 1, #kinds do
+  if kinds[i] ~= 'none' and kinds[i] ~= 'set' and kinds[i] ~= 'hash' then
+    return redis.error_reply('metering: expected a set or hash, found a ' .. kinds[i])
+  end
+end
+if redis.call('SADD', ledger, ARGV[1]) == 0 then
+  return 0
+end
+redis.call('HINCRBY', daily, 'input_tokens', ARGV[2])
+redis.call('HINCRBY', daily, 'output_tokens', ARGV[3])
+redis.call('HINCRBY', daily, 'total_tokens', ARGV[4])
+redis.call('HINCRBY', daily, 'request_count', 1)
+redis.call('SADD', models, ARGV[5])
+redis.call('HINCRBY', billing, 'total_tokens', ARGV[4])
+redis.call('HINCRBY', billing, 'request_count', 1)
+return 1
+"""
+
+_APPLY_META_COUNT = """
+local ledger, meta = KEYS[1], KEYS[2]
+local kinds = {redis.call('TYPE', ledger).ok, redis.call('TYPE', meta).ok}
+for i = 1, #kinds do
+  if kinds[i] ~= 'none' and kinds[i] ~= 'set' and kinds[i] ~= 'hash' then
+    return redis.error_reply('metering: expected a set or hash, found a ' .. kinds[i])
+  end
+end
+if redis.call('SADD', ledger, ARGV[1]) == 0 then
+  return 0
+end
+redis.call('HINCRBY', meta, ARGV[2], 1)
+return 1
+"""
 
 
 def meta_daily_key(tenant_id: str, usage_date: str) -> str:
@@ -205,13 +246,17 @@ def process_meta_event(raw_event: Any, r_client: Optional[redis.Redis] = None) -
         if not event_id or not tenant_id:
             raise ValueError("Missing required event_id or tenant_id")
 
-        is_new = r_client.sadd("usage:processed_events", event_id)
+        timestamp_str = event.get("timestamp") or datetime.now(timezone.utc).isoformat()
+        is_new = r_client.eval(
+            _APPLY_META_COUNT,
+            2,
+            "usage:processed_events",
+            meta_daily_key(tenant_id, timestamp_str[:10]),
+            event_id,
+            counter,
+        )
         if not is_new:
             logger.info(f"Duplicate meta event {event_id} skipped.")
-            return True
-
-        timestamp_str = event.get("timestamp") or datetime.now(timezone.utc).isoformat()
-        r_client.hincrby(meta_daily_key(tenant_id, timestamp_str[:10]), counter, 1)
         return True
 
     except Exception as exc:

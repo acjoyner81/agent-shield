@@ -69,7 +69,7 @@ def enable_dev_mode():
 
 
 @pytest.fixture
-def fake_redis():
+def scripted_redis():
     """A fake Redis whose hashes and scan results the test controls."""
     client_mock = MagicMock()
 
@@ -147,63 +147,56 @@ class TestMetaCounters:
             "data": data or {},
         }
 
-    def test_authz_failure_increments_failed_requests(self):
-        r = MagicMock()
-        r.sadd.return_value = 1
-
+    def test_authz_failure_increments_failed_requests(self, fake_redis):
         assert process_meta_event(
-            self.make_event("agentshield.security.authz_failure", "evt_a1"), r_client=r
+            self.make_event("agentshield.security.authz_failure", "evt_a1"), r_client=fake_redis
         ) is True
-        r.hincrby.assert_called_once_with(
-            "usage:daily:tenant_alpha:2026-09-24:__meta__", "failed_requests", 1
-        )
+        assert fake_redis.hget(
+            "usage:daily:tenant_alpha:2026-09-24:__meta__", "failed_requests"
+        ) == "1"
 
-    def test_rate_limit_increments_rate_limited_requests(self):
-        r = MagicMock()
-        r.sadd.return_value = 1
-
+    def test_rate_limit_increments_rate_limited_requests(self, fake_redis):
         assert process_meta_event(
-            self.make_event("agentshield.security.rate_limit_exceeded", "evt_r1"), r_client=r
+            self.make_event("agentshield.security.rate_limit_exceeded", "evt_r1"), r_client=fake_redis
         ) is True
-        r.hincrby.assert_called_once_with(
-            "usage:daily:tenant_alpha:2026-09-24:__meta__", "rate_limited_requests", 1
-        )
+        assert fake_redis.hget(
+            "usage:daily:tenant_alpha:2026-09-24:__meta__", "rate_limited_requests"
+        ) == "1"
 
-    def test_request_completed_counts_quality_only_with_a_passing_eval_flag(self):
-        passing = MagicMock()
-        passing.sadd.return_value = 1
+    def test_request_completed_counts_quality_only_with_a_passing_eval_flag(self, fake_redis):
+        meta_key = "usage:daily:tenant_alpha:2026-09-24:__meta__"
+
         process_meta_event(
             self.make_event(
                 "agentshield.telemetry.request.completed",
                 "evt_q1",
                 data={"method": "POST", "status_code": 200, "eval_passed": True},
             ),
-            r_client=passing,
+            r_client=fake_redis,
         )
-        passing.hincrby.assert_called_once_with(
-            "usage:daily:tenant_alpha:2026-09-24:__meta__", "quality_passed", 1
-        )
+        assert fake_redis.hget(meta_key, "quality_passed") == "1"
 
-        unflagged = MagicMock()
-        unflagged.sadd.return_value = 1
         process_meta_event(
             self.make_event(
                 "agentshield.telemetry.request.completed",
                 "evt_q2",
                 data={"method": "POST", "status_code": 200},
             ),
-            r_client=unflagged,
+            r_client=fake_redis,
         )
-        unflagged.hincrby.assert_not_called()
+        assert fake_redis.hget(meta_key, "quality_passed") == "1", (
+            "a request with no passing eval flag must not count toward quality"
+        )
 
-    def test_duplicate_event_is_not_counted_twice(self):
-        r = MagicMock()
-        r.sadd.return_value = 0  # already in the processed ledger
+    def test_duplicate_event_is_not_counted_twice(self, fake_redis):
+        event = self.make_event("agentshield.security.authz_failure", "evt_dup")
 
-        assert process_meta_event(
-            self.make_event("agentshield.security.authz_failure", "evt_dup"), r_client=r
-        ) is True
-        r.hincrby.assert_not_called()
+        assert process_meta_event(event, r_client=fake_redis) is True
+        assert process_meta_event(event, r_client=fake_redis) is True
+
+        assert fake_redis.hget(
+            "usage:daily:tenant_alpha:2026-09-24:__meta__", "failed_requests"
+        ) == "1"
 
     def test_malformed_event_routes_to_dlq(self):
         r = MagicMock()
@@ -223,8 +216,8 @@ class TestMetaCounters:
 class TestUsageSummaryCost:
     """AC-1, AC-2: cost on the summary, gated on billing:admin."""
 
-    def seed(self, fake_redis, tenant="tenant_alpha"):
-        return fake_redis.build(
+    def seed(self, scripted_redis, tenant="tenant_alpha"):
+        return scripted_redis.build(
             [
                 (
                     model_key(tenant, "2026-09-20", "gpt-4o"),
@@ -247,8 +240,8 @@ class TestUsageSummaryCost:
             ]
         )
 
-    def test_cost_computed_when_requested(self, fake_redis):
-        r = self.seed(fake_redis)
+    def test_cost_computed_when_requested(self, scripted_redis):
+        r = self.seed(scripted_redis)
         summary = get_tenant_usage_summary(
             "tenant_alpha", "2026-09-01", "2026-09-30", r_client=r, include_cost=True
         )
@@ -258,8 +251,8 @@ class TestUsageSummaryCost:
         assert by_model["unlisted-model"].cost_usd == 0.0
         assert summary.totals.estimated_cost_usd == pytest.approx(0.01)
 
-    def test_cost_is_null_when_not_requested(self, fake_redis):
-        r = self.seed(fake_redis)
+    def test_cost_is_null_when_not_requested(self, scripted_redis):
+        r = self.seed(scripted_redis)
         summary = get_tenant_usage_summary(
             "tenant_alpha", "2026-09-01", "2026-09-30", r_client=r, include_cost=False
         )
@@ -269,8 +262,8 @@ class TestUsageSummaryCost:
         # usage is still reported
         assert summary.totals.total_tokens == 5000
 
-    def test_endpoint_returns_cost_for_billing_admin(self, fake_redis):
-        r = self.seed(fake_redis)
+    def test_endpoint_returns_cost_for_billing_admin(self, scripted_redis):
+        r = self.seed(scripted_redis)
         app.dependency_overrides[resolve_active_tenant] = tenant_principal(BILLING_ADMIN_CLAIMS)
         try:
             with patch("gateway.metering.get_redis_client", return_value=r):
@@ -285,9 +278,9 @@ class TestUsageSummaryCost:
         assert priced["gpt-4o"]["cost_usd"] == pytest.approx(0.01)
         assert priced["unlisted-model"]["cost_usd"] == 0.0
 
-    def test_endpoint_nulls_cost_without_billing_admin(self, fake_redis):
+    def test_endpoint_nulls_cost_without_billing_admin(self, scripted_redis):
         """AC-2, AC-6: usage visible, spend withheld, not a 403."""
-        r = self.seed(fake_redis)
+        r = self.seed(scripted_redis)
         with patch("gateway.metering.get_redis_client", return_value=r):
             response = client.get("/v1/usage/summary", headers=DEV_HEADERS)
 
@@ -298,8 +291,8 @@ class TestUsageSummaryCost:
         assert body["totals"]["total_tokens"] == 5000
         assert body["totals"]["total_requests"] == 5
 
-    def test_endpoint_nulls_cost_for_unprivileged_principal(self, fake_redis):
-        r = self.seed(fake_redis)
+    def test_endpoint_nulls_cost_for_unprivileged_principal(self, scripted_redis):
+        r = self.seed(scripted_redis)
         with patch("gateway.metering.get_redis_client", return_value=r):
             response = client.get("/v1/usage/summary", headers=UNPRIVILEGED_HEADERS)
 
@@ -310,8 +303,8 @@ class TestUsageSummaryCost:
 class TestUsageSummaryCounters:
     """AC-3, AC-6: the __meta__ counters surface in the summary and stay tenant scoped."""
 
-    def seed_with_meta(self, fake_redis, tenant="tenant_alpha", date="2026-09-20"):
-        return fake_redis.build(
+    def seed_with_meta(self, scripted_redis, tenant="tenant_alpha", date="2026-09-20"):
+        return scripted_redis.build(
             [
                 (
                     model_key(tenant, date, "gpt-4o"),
@@ -333,8 +326,8 @@ class TestUsageSummaryCounters:
             ]
         )
 
-    def test_counters_are_summed_from_the_meta_key(self, fake_redis):
-        r = self.seed_with_meta(fake_redis)
+    def test_counters_are_summed_from_the_meta_key(self, scripted_redis):
+        r = self.seed_with_meta(scripted_redis)
         summary = get_tenant_usage_summary(
             "tenant_alpha", "2026-09-01", "2026-09-30", r_client=r
         )
@@ -343,9 +336,9 @@ class TestUsageSummaryCounters:
         assert summary.totals.failed_requests == 2
         assert summary.totals.rate_limited_requests == 3
 
-    def test_meta_key_is_not_reported_as_a_model(self, fake_redis):
+    def test_meta_key_is_not_reported_as_a_model(self, scripted_redis):
         """The __meta__ key shares the date filter but must never appear as a model row."""
-        r = self.seed_with_meta(fake_redis)
+        r = self.seed_with_meta(scripted_redis)
         summary = get_tenant_usage_summary(
             "tenant_alpha", "2026-09-01", "2026-09-30", r_client=r
         )
@@ -353,8 +346,8 @@ class TestUsageSummaryCounters:
         assert [m.model for m in summary.by_model] == ["gpt-4o"]
         assert META_MODEL not in [m.model for m in summary.by_model]
 
-    def test_meta_key_does_not_inflate_token_totals(self, fake_redis):
-        r = self.seed_with_meta(fake_redis)
+    def test_meta_key_does_not_inflate_token_totals(self, scripted_redis):
+        r = self.seed_with_meta(scripted_redis)
         summary = get_tenant_usage_summary(
             "tenant_alpha", "2026-09-01", "2026-09-30", r_client=r
         )
@@ -362,8 +355,8 @@ class TestUsageSummaryCounters:
         assert summary.totals.total_tokens == 2000
         assert summary.totals.total_requests == 8
 
-    def test_counters_default_to_zero_when_absent(self, fake_redis):
-        r = fake_redis.build(
+    def test_counters_default_to_zero_when_absent(self, scripted_redis):
+        r = scripted_redis.build(
             [(model_key("tenant_alpha", "2026-09-20", "gpt-4o"), {"total_tokens": "10", "request_count": "1"})]
         )
         summary = get_tenant_usage_summary(
@@ -374,9 +367,9 @@ class TestUsageSummaryCounters:
         assert summary.totals.failed_requests == 0
         assert summary.totals.rate_limited_requests == 0
 
-    def test_summary_only_returns_the_requesting_tenants_numbers(self, fake_redis):
+    def test_summary_only_returns_the_requesting_tenants_numbers(self, scripted_redis):
         """AC-6: tenant A's response never carries tenant B's roll-ups."""
-        r = fake_redis.build(
+        r = scripted_redis.build(
             [
                 (model_key("tenant_alpha", "2026-09-20", "gpt-4o"), {"total_tokens": "100", "request_count": "1"}),
                 (model_key("tenant_beta", "2026-09-20", "gpt-4o"), {"total_tokens": "9999", "request_count": "77"}),
@@ -389,9 +382,9 @@ class TestUsageSummaryCounters:
         assert alpha.totals.total_requests == 1
         assert alpha.totals.failed_requests == 0
 
-    def test_each_tenant_sees_only_its_own_summary(self, fake_redis):
+    def test_each_tenant_sees_only_its_own_summary(self, scripted_redis):
         """AC-6: two principals, two isolated responses over the same Redis."""
-        r = fake_redis.build(
+        r = scripted_redis.build(
             [
                 (model_key("tenant_alpha", "2026-09-20", "gpt-4o"), {"total_tokens": "100", "request_count": "1"}),
                 (model_key("tenant_beta", "2026-09-20", "gpt-4o"), {"total_tokens": "9999", "request_count": "77"}),
@@ -417,8 +410,8 @@ class TestUsageSummaryCounters:
         assert beta.json()["tenant_id"] == "tenant_beta"
         assert beta.json()["totals"]["total_tokens"] == 9999
 
-    def test_counters_ignore_dates_outside_the_period(self, fake_redis):
-        r = fake_redis.build(
+    def test_counters_ignore_dates_outside_the_period(self, scripted_redis):
+        r = scripted_redis.build(
             [
                 (model_key("tenant_alpha", "2026-08-01", "gpt-4o"), {"total_tokens": "500", "request_count": "5"}),
                 (meta_daily_key("tenant_alpha", "2026-08-01"), {"failed_requests": "9"}),

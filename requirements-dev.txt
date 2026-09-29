@@ -1,0 +1,6 @@
+-r requirements.txt
+
+pytest
+# The [lua] extra is required: metering claims an event and rolls it up in one
+# Redis script, and fakeredis refuses to run scripts without it.
+fakeredis[lua]>=2.38
