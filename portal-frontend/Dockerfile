@@ -4,7 +4,15 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-RUN npm run build
+# Explicitly the development configuration. `npm run build` resolves to the
+# `production` configuration in angular.json, which has no fileReplacements and
+# therefore reads src/environments/environment.ts instead of the development
+# file. That made the local compose stack serve a production bundle, so
+# `cacheLocation: 'localstorage'` in environment.development.ts had no effect
+# here and every guarded route restarted the PKCE exchange on reload. A local
+# stack should not be shipping a production bundle; production deployments
+# override this with their own build command.
+RUN npx ng build --configuration development
 
 # Stage 2: Serve
 FROM nginx:alpine
