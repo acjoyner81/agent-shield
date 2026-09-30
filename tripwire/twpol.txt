@@ -1,13 +1,19 @@
 # Tripwire Policy for AgentShield FIM
+#
+# Attribute flags for the severity levels below. Written out rather than using
+# $(IgnoreNone)-SHa, which is how this file originally read: Tripwire 2.4 rejects
+# $(...) macro references in a policy file's GLOBAL section, and IgnoreNone is
+# only defined for a policy, so moving the levels to twcfg.txt failed too with
+# "Configuration file uses an undefined variable: IgnoreNone".
+# +p (perms), +i (inode), +n (links), +u (user), +g (group), +s (size),
+# +m (mtime), +c (ctime), +C (SHA hash).
 @@section GLOBAL
 TWROOT=/etc/tripwire ;
 TWBIN=/usr/sbin ;
 
-# Attribute flags:
-# +p (perms), +i (inode), +n (links), +u (user), +g (group), +s (size), +m (mtime), +c (ctime), +C (SHA hash)
-SEC_CRIT   = $(IgnoreNone)-SHa ;
-SEC_CONFIG = $(IgnoreNone)-SHa ;
-SEC_APP    = $(IgnoreNone)-SHa ;
+SEC_CRIT   = -p+imnsugcms ;
+SEC_CONFIG = -p+imnsugcms ;
+SEC_APP    = -p+imnsugcms ;
 
 @@section FS
 

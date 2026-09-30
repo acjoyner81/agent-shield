@@ -107,6 +107,19 @@ services:
       context: ./tripwire
       dockerfile: Dockerfile
     container_name: agent-shield-tripwire
+    # Tripwire bakes $(HOSTNAME) into its local key and baseline DB names at
+    # config compile time. Docker's default hostname is the container ID, which
+    # changes on every recreate, so a persisted tripwire-keys volume would no
+    # longer match the keys and twadmin would re-prompt to overwrite site.key
+    # forever. Pin it so the keys and baseline stay valid across restarts.
+    hostname: agentshield-fim
+    # Tripwire's report output is unbounded; without a cap it filled the Docker
+    # VM disk once already (1.8 GB json log) and broke builds.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       # Mount application code & configurations read-only for file integrity monitoring
       - ./gateway:/mnt/gateway:ro
