@@ -47,9 +47,14 @@ fi
 # twadmin expands $(HOSTNAME) in twcfg.txt when it signs tw.cfg, so a config
 # built under a previous container hostname points at that host's local key and
 # baseline DB. tw.cfg itself is a signed binary blob, so the only way to read
-# the compiled paths back is to have twadmin decrypt and print it. Recompile
-# when that output is not this host's, otherwise every check looks for a local
-# key that does not exist.
+# the compiled paths back is to have twadmin print it. Recompile when that
+# output is not this host's, otherwise every check looks for a local key that
+# does not exist.
+#
+# `--print-cfgfile` takes no key or passphrase flags: tw.cfg is already signed,
+# so passing --site-keyfile here is an "Invalid argument" error. An earlier
+# version of this check did pass it, which made every print fail and forced a
+# needless rebuild on every start.
 #
 # Only a missing config is (re)created. An existing config for this host is
 # reused, so a healthy container does not rebuild it on every start.
@@ -57,8 +62,7 @@ NEED_CFG=0
 if [ ! -f /etc/tripwire/tw.cfg ]; then
     NEED_CFG=1
 else
-    COMPILED=$(twadmin --print-cfgfile --site-keyfile /etc/tripwire/site.key \
-        -Q "${SITE_KEY_PASSPHRASE}" < /dev/null 2>/dev/null | grep -m1 '^DBFILE=' || true)
+    COMPILED=$(twadmin --print-cfgfile < /dev/null 2>/dev/null | grep -m1 '^DBFILE=' || true)
     case "${COMPILED}" in
         "DBFILE=/var/lib/tripwire/${HOSTNAME}.twd") ;;
         *)
