@@ -1,6 +1,5 @@
 """Tenant token bucket rate limiting module for AgentShield Gateway."""
 
-import asyncio
 import math
 import time
 from typing import Optional, Tuple
@@ -173,14 +172,17 @@ async def verify_rate_limit(request: Request, response: Response) -> Optional[st
 
         user_id = getattr(request.state, "user_id", "unknown")
 
-        asyncio.create_task(
-            emit_rate_limit_exceeded(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                trace_id=trace_id,
-                span_id=trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown",
-                rate_limit_remaining=0,
-            )
+        # Synchronous direct call. `emit_rate_limit_exceeded` is a plain function
+        # that pushes to Redis and returns the event JSON, not a coroutine, so
+        # wrapping it in `asyncio.create_task` raised TypeError and turned every
+        # 429 into a 500 before the response could be built. The 429 branch must
+        # not depend on telemetry succeeding, and it must not await anything.
+        emit_rate_limit_exceeded(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            trace_id=trace_id,
+            span_id=trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown",
+            rate_limit_remaining=0,
         )
 
         headers = {

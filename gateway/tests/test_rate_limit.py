@@ -95,8 +95,7 @@ def test_rate_limit_headers_on_success():
 def test_rate_limit_exhausted_returns_429():
     """Verify capacity exhaustion returns 429 with Retry-After and telemetry log (AC-3, AC-4)."""
     with patch("gateway.rate_limit.check_token_bucket", return_value=(False, 0, 60, 60, 10)), \
-         patch("gateway.rate_limit.emit_rate_limit_exceeded"), \
-         patch("asyncio.create_task") as mock_task:
+         patch("gateway.rate_limit.emit_rate_limit_exceeded") as mock_emit:
         
         response = client.get(
             "/api/v1/protected",
@@ -110,8 +109,12 @@ def test_rate_limit_exhausted_returns_429():
         assert response.headers.get("Retry-After") == "10"
         assert response.headers.get("X-RateLimit-Remaining") == "0"
         
-        # Verify telemetry warning was dispatched
-        mock_task.assert_called_once()
+        # The telemetry event is emitted directly. It used to be asserted through
+        # `asyncio.create_task`, which only passed because the task was never
+        # awaited and the emitter was mocked out; in production the same call
+        # raised TypeError and answered 500. Assert the emit itself.
+        mock_emit.assert_called_once()
+        assert mock_emit.call_args.kwargs["tenant_id"] == "tenant_alpha"
 
 def test_rate_limit_uses_stripe_redis_tier():
     """Verify rate limit capacity resolves from Redis tier setting set by Stripe webhooks."""

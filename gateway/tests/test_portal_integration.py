@@ -219,10 +219,16 @@ class TestPortalErrorSemantics:
         assert detail["max_budget_usd"] == 50.0
 
     def test_rate_limited_request_returns_429(self, fake_redis):
-        """429 is the one status the limiter must emit before auth can mask it."""
-        with patch("gateway.rate_limit.check_token_bucket", return_value=(False, 0, 60, 60, 10)), \
-             patch("gateway.rate_limit.emit_rate_limit_exceeded"), \
-             patch("asyncio.create_task"):
+        """429 is the one status the limiter must emit before auth can mask it.
+
+        Nothing is mocked past the token bucket, deliberately. Mocking the event
+        emitter hid a real crash: the limiter wrapped a synchronous call in
+        `asyncio.create_task`, which raised TypeError, so the 429 never left the
+        process and the portal was served a 500 instead. Patching the emitter is
+        what let that ship, so the emitter is left real here and only the bucket
+        is stubbed.
+        """
+        with patch("gateway.rate_limit.check_token_bucket", return_value=(False, 0, 60, 60, 10)):
             response = client.post(
                 "/v1/chat/completions", headers=BEARER, json={"prompt": "hello"}
             )
