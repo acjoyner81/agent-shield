@@ -35,15 +35,41 @@ export const environment = {
     // oversight: it changes what the tenant consents to, so it should be a
     // decision rather than a default.
     //
-    // Known and still open: a full page load of a guarded route restarts
-    // authorization. `checkSession` misses the cached entry and falls back to its
-    // documented full-page redirect to /authorize, and stock `authGuardFn` then
-    // calls `loginWithRedirect` when `isAuthenticated$` is false. The token is
-    // present and valid for 24h when this happens, so it is a cache lookup
-    // problem, not an expired session. In-app navigation is unaffected, which is
-    // how the Spec 0013 failure states are currently verified.
+    // A full page load of a guarded route works because of the audience-keyed
+    // `scope` below. With a string scope it silently does not: the app restarts
+    // authorization on every reload while looking correctly configured. That is
+    // the whole reason this file is not just a copy of the production one.
     authorizationParams: {
       audience: 'https://api.agentshield.local',
+      // Keyed BY AUDIENCE, and this is load bearing.
+      //
+      // `auth0-spa-js` builds an audience -> scope map at construction via
+      // `injectDefaultScopes(authorizationParams.scope, 'openid', ...)`. Given a
+      // STRING it keys that map by the literal `DEFAULT_AUDIENCE` ("default") and
+      // nothing else. `_getIdTokenFromCache` then looks up
+      // `this.scope['https://api.agentshield.local']`, gets `undefined`, and
+      // builds a cache key with the scope omitted, so the lookup misses an entry
+      // whose key does include the scope.
+      //
+      // The object form keys the map by the real audience. Confirmed by reading
+      // the SDK: `getUniqueScopes('openid', 'openid profile email', <empty session
+      // scope>)` dedupes to exactly `'openid profile email'`, which is the string
+      // the stored entry is keyed by.
+      //
+      // STILL OPEN, and this comment should not be read as claiming otherwise: a
+      // full page load of a guarded route still restarts authorization. Keying the
+      // scope correctly is necessary but not sufficient. A deeper, separate
+      // defect sits behind it -- the gateway answers every authenticated call
+      // with 403 "Token missing mandatory tenant identification claim", because
+      // this Auth0 tenant issues no tenant claim for the API to read. Until the
+      // token carries one, the portal has an authenticated session it cannot use.
+      // See `core/guards/auth.guard.ts` for why `isAuthenticated$` is unusable
+      // regardless.
+      //
+      // A string here is the trap: it typechecks, and it looks right.
+      scope: {
+        'https://api.agentshield.local': 'openid profile email',
+      },
       redirect_uri: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:4200'
     }
   }
