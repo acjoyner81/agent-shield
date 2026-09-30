@@ -1,8 +1,10 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+
 import { NotificationCenter } from './notification-center.component';
 import { NotificationService } from '../../core/errors/error-state.service';
 import { GatewayError } from '../../core/errors/gateway-error';
+import { AuthService } from '../../core/services/auth.service';
 
 /**
  * The container's contract, which is mostly about what it must NOT do.
@@ -20,10 +22,20 @@ function gatewayError(overrides: Partial<GatewayError> = {}): GatewayError {
 describe('NotificationCenter', () => {
   let fixture: ComponentFixture<NotificationCenter>;
   let service: NotificationService;
+  let auth: { login: jasmine.Spy; authenticated: () => boolean };
 
   beforeEach(async () => {
+    // The component owns the 401 redirect, so it injects the Auth0 client. A stub
+    // keeps this suite about the container's own contract, and records the
+    // redirect so the 401 behaviour is asserted here rather than only by hand.
+    auth = {
+      login: jasmine.createSpy('login'),
+      authenticated: () => false,
+    };
+
     await TestBed.configureTestingModule({
       imports: [NotificationCenter],
+      providers: [{ provide: AuthService, useValue: auth }],
     }).compileComponents();
 
     fixture = TestBed.createComponent(NotificationCenter);
@@ -187,6 +199,48 @@ describe('NotificationCenter', () => {
 
       expect(document.activeElement).toBe(sentinel);
       document.body.removeChild(sentinel);
+    });
+  });
+
+  /**
+   * The 401 consequence.
+   *
+   * `ErrorStateService` sets `sessionExpired` and is covered for that on its own,
+   * which is exactly how the redirect went missing: every test asserted the
+   * signal, none asserted the navigation it exists to cause. These assert the
+   * outcome, because the outcome is the requirement.
+   */
+  describe('a session expiry', () => {
+    it('redirects to re-authenticate', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      fixture.detectChanges();
+
+      expect(auth.login).toHaveBeenCalledTimes(1);
+    });
+
+    it('redirects once, not once per 401 in a burst', () => {
+      for (let i = 0; i < 5; i++) {
+        service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+        fixture.detectChanges();
+      }
+
+      expect(auth.login).toHaveBeenCalledTimes(1);
+    });
+
+    it('overrides a silent policy', () => {
+      // The dashboard poll is the only signal that a session died, so suppressing
+      // this would strand the user on a dead session with no explanation.
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      fixture.detectChanges();
+
+      expect(auth.login).toHaveBeenCalled();
+    });
+
+    it('does not redirect for a 403, which is a valid session lacking a scope', () => {
+      service.report(gatewayError({ kind: 'scope_denied', status: 403 }), 'banner');
+      fixture.detectChanges();
+
+      expect(auth.login).not.toHaveBeenCalled();
     });
   });
 });

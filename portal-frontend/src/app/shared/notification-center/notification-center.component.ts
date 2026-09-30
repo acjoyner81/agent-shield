@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, effect, inject, untracked } from '@angular/core';
 import { NotificationService, StaleWidget } from '../../core/errors/error-state.service';
+import { AuthService } from '../../core/services/auth.service';
 
 /**
  * The app level host for every gateway notice.
@@ -162,6 +163,50 @@ import { NotificationService, StaleWidget } from '../../core/errors/error-state.
 })
 export class NotificationCenter {
   protected readonly notifications = inject(NotificationService);
+  // The app's own auth facade, not the Auth0 SDK directly, so this component
+  // depends on one abstraction and the shell's existing test double covers it.
+  private readonly auth = inject(AuthService);
+
+  constructor() {
+    // The 401 consequence, and the only place in the app that acts on it.
+    //
+    // `ErrorStateService.report` sets `sessionExpired` for a 401 and exempts that
+    // kind from silent suppression, but it is a pure signal store: it holds state
+    // and never navigates. Nothing else read this signal, so a dead session
+    // produced neither a redirect nor an explanation, and the specs missed it
+    // because they assert the signal rather than the navigation it implies.
+    //
+    // Keyed on the signal, so it fires once per transition to true.
+    //
+    // The flag is deliberately NOT acknowledged here. Resetting it before the
+    // navigation completes re-arms the guard while the app is still on its way
+    // out, so a second 401 from a concurrent poll starts a second redirect: a
+    // storm of authorization round trips. It is acknowledged below instead, once
+    // a live session is confirmed.
+    //
+    // Only 401 redirects. A 403 must not re-authenticate: the session is valid
+    // and simply lacks the scope, so sending the user through Auth0 again lands
+    // them back here with the same refusal, which is the loop Spec 0013 forbids.
+    effect(() => {
+      if (!this.notifications.sessionExpired()) {
+        return;
+      }
+      this.auth.login();
+    });
+
+    // Re-arm the guard, but only against a session that is actually live again.
+    //
+    // Acknowledging on the transition into an authenticated state means a genuine
+    // second expiry still redirects, while the repeat 401s of a single expiry do
+    // not: they all land while the flag is already true and the effect above has
+    // nothing to react to.
+    effect(() => {
+      if (!this.auth.authenticated()) {
+        return;
+      }
+      untracked(() => this.notifications.acknowledgeSessionExpiry());
+    });
+  }
 
   /**
    * A word for every kind, so the state never depends on the colour alone.
