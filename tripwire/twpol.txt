@@ -22,3 +22,20 @@ SEC_APP    = -p+imnsugcms ;
 /mnt/java-services  -> $(SEC_APP) (recurse=true) ;
 /mnt/nginx.conf     -> $(SEC_CONFIG) ;
 /mnt/config         -> $(SEC_CONFIG) (recurse=true) ;
+
+# Stop points. A stop point names one literal path, it does not take a pattern,
+# so every generated directory has to be listed by name. A regex here compiles
+# without complaint and then never matches anything, which is the quiet failure
+# that left 141 build artifacts under watch.
+#
+# These directories are rewritten by any local test run or build while the
+# source around them stays put, so monitoring them turns an ordinary rebuild
+# into a mass tampering event and trains everyone to ignore this monitor.
+!/mnt/gateway/__pycache__ ;
+!/mnt/gateway/tests/__pycache__ ;
+!/mnt/gateway/tests/e2e/__pycache__ ;
+!/mnt/config/__pycache__ ;
+!/mnt/config/guardrails/__pycache__ ;
+!/mnt/config/guardrails/tests/__pycache__ ;
+!/mnt/java-services/gateway-java/target ;
+!/mnt/java-services/mcp-server/target ;

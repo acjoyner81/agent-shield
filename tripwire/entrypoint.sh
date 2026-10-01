@@ -63,8 +63,20 @@ if [ ! -f /etc/tripwire/tw.cfg ]; then
     NEED_CFG=1
 else
     COMPILED=$(twadmin --print-cfgfile < /dev/null 2>/dev/null | grep -m1 '^DBFILE=' || true)
-    case "${COMPILED}" in
-        "DBFILE=/var/lib/tripwire/${HOSTNAME}.twd") ;;
+
+    # --print-cfgfile echoes the unresolved template, so $(HOSTNAME) is still literal
+    # in its output. An earlier check compared that template against the expanded path,
+    # so the two could never agree and every start declared the config stale and
+    # rebuilt it. Expand the template first, then ask the question that actually
+    # matters: does the baseline this config names exist for this host?
+    RESOLVED=$(printf '%s' "${COMPILED}" | sed "s/\$(HOSTNAME)/${HOSTNAME}/g")
+    case "${RESOLVED}" in
+        "DBFILE=/var/lib/tripwire/${HOSTNAME}.twd")
+            if [ ! -f "/var/lib/tripwire/${HOSTNAME}.twd" ]; then
+                echo "[Tripwire FIM] Compiled config names a baseline that is missing, recompiling..."
+                NEED_CFG=1
+            fi
+            ;;
         *)
             echo "[Tripwire FIM] Compiled config is stale (${COMPILED:-unreadable}), recompiling..."
             NEED_CFG=1
@@ -118,22 +130,42 @@ while true; do
     # STATUS is captured inside an if condition on purpose: this script runs under
     # `set -e`, so a bare `tripwire --check` that returns non-zero would exit the
     # container before the exit code could be read.
-    if tripwire --check < /dev/null; then
+    if CHECK_OUTPUT=$(tripwire --check < /dev/null 2>&1); then
         STATUS=0
     else
         STATUS=$?
     fi
+    printf '%s\n' "${CHECK_OUTPUT}"
+
+    OBJECTS=$(printf '%s' "${CHECK_OUTPUT}" | sed -n 's/.*Total objects scanned:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+    VIOLATIONS=$(printf '%s' "${CHECK_OUTPUT}" | sed -n 's/.*Total violations found:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
 
     if [ "${STATUS}" -ne 0 ]; then
         echo "[Tripwire FIM] ALERT: Integrity violation detected (exit ${STATUS})!"
 
-        # Ship the alert to the Python Gateway
+        # Ship the alert to the Python Gateway. The counts go into the message
+        # because "a violation was detected" is not actionable, and this alert is
+        # the only signal anyone gets that the baseline has drifted.
         curl -s -X POST http://agentshield-python-gateway:8000/v1/telemetry/logs \
             -H "Content-Type: application/json" \
-            -d "{\"tenant_id\": \"system\", \"level\": \"CRITICAL\", \"message\": \"Tripwire FIM detected a file integrity violation on host ${HOSTNAME}!\"}" \
+            -d "{\"tenant_id\": \"system\", \"level\": \"CRITICAL\", \"message\": \"Tripwire FIM on ${HOSTNAME}: ${VIOLATIONS:-?} of ${OBJECTS:-?} monitored objects differ from the approved baseline. Review the report, then run tripwire/approve.sh to accept the change.\"}" \
             || echo "[Tripwire FIM] Failed to send alert to gateway"
     else
         echo "[Tripwire FIM] No violations detected."
+    fi
+
+    # Tripwire writes a fresh report on every check and never prunes any of them.
+    # At one report per CHECK_INTERVAL_SECONDS that grows without bound and fills
+    # the volume, which is what produced the "No space left on device" errors in
+    # the container log. Keep the most recent REPORT_KEEP so an operator can still
+    # review the current one.
+    REPORT_KEEP="${REPORT_KEEP:-20}"
+    if [ -d /var/lib/tripwire/report ]; then
+        ls -1t /var/lib/tripwire/report/*.twr 2>/dev/null \
+            | tail -n "+$((REPORT_KEEP + 1))" \
+            | while read -r OLD_REPORT; do
+                rm -f "${OLD_REPORT}"
+            done
     fi
 
     echo "[Tripwire FIM] Integrity check complete. Sleeping for ${CHECK_INTERVAL_SECONDS}s..."

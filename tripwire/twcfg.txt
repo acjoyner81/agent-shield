@@ -3,7 +3,11 @@ DBFILE=/var/lib/tripwire/$(HOSTNAME).twd
 REPORTFILE=/var/lib/tripwire/report/$(HOSTNAME)-$(DATE).twr
 SITEKEYFILE=/etc/tripwire/site.key
 LOCALKEYFILE=/etc/tripwire/$(HOSTNAME)-local.key
-EDITOR=/bin/vi
+# A no-op editor so `tripwire --update --twrfile <report>` can run unattended and
+# fold a reviewed report into the baseline. The default /bin/vi does not exist in
+# this image, so an interactive update dies with "Editor could not be launched" and
+# leaves no way to approve a change short of discarding the baseline with --init.
+EDITOR=/bin/true
 LATEPROMPTING=false
 LOOSEDIRECTORYCHECKING=false
 MAILNOVIOLATIONS=true

@@ -13,7 +13,8 @@ WORKDIR /etc/tripwire
 COPY twcfg.txt /etc/tripwire/twcfg.txt
 COPY twpol.txt /etc/tripwire/twpol.txt
 COPY entrypoint.sh /entrypoint.sh
+COPY approve.sh /approve.sh
 
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh /approve.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
