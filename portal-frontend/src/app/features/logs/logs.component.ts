@@ -85,14 +85,24 @@ export class LogsComponent implements OnInit {
    */
   readonly lastUpdated = computed(() => this.notifications.relativeLastUpdated('logs'));
 
-  /** Honest about having no rows, rather than rendering a fabricated 184ms. */
+  /**
+   * Honest about having no rows, rather than rendering a fabricated 184ms.
+   *
+   * Only request events carry a latency. Key rotations and token usage have
+   * none, so they are excluded from the average instead of being counted as
+   * 0ms, which would have dragged the figure down toward the fastest thing the
+   * gateway does.
+   */
   readonly averageLatencyMs = computed(() => {
-    const entries = this.telemetry.logs();
-    if (entries.length === 0) {
+    const measured = this.telemetry
+      .logs()
+      .map((entry) => entry.latencyMs)
+      .filter((value): value is number => typeof value === 'number');
+    if (measured.length === 0) {
       return '—';
     }
-    const total = entries.reduce((sum, entry) => sum + (entry.latencyMs ?? 0), 0);
-    return `${Math.round(total / entries.length)}ms`;
+    const total = measured.reduce((sum, value) => sum + value, 0);
+    return `${Math.round(total / measured.length)}ms`;
   });
 
   /** The old template appended a literal ".4%" to a rounded integer. */
@@ -116,28 +126,33 @@ export class LogsComponent implements OnInit {
   };
   readonly columnDefs: ColDef<TelemetryLog>[] = [
     { field: 'eventId', headerName: 'Event ID', width: 130 },
-    { field: 'timestamp', headerName: 'Timestamp', width: 160 },
-    { field: 'tenantId', headerName: 'Tenant', flex: 1 },
+    { field: 'timestamp', headerName: 'Timestamp', width: 180 },
+    { field: 'tenantId', headerName: 'Tenant', width: 120 },
+    { field: 'message', headerName: 'Event', flex: 2 },
     {
       field: 'statusCode',
       headerName: 'Status',
       width: 100,
+      // A row with no status is not a successful request, it is an event that
+      // was never an HTTP response, so it is not coloured as a green 200.
       cellClass: (params) =>
-        params.value === 429 || params.value >= 500
+        params.value == null ? 'status-none' : params.value === 429 || params.value >= 500
           ? 'status-danger'
           : 'status-ok',
+      valueFormatter: (params) => (params.value == null ? '—' : `${params.value}`),
     },
     {
       field: 'costUsd',
       headerName: 'Cost',
       width: 105,
-      valueFormatter: (params) => `$${Number(params.value).toFixed(4)}`,
+      valueFormatter: (params) =>
+        params.value == null ? '—' : `$${Number(params.value).toFixed(4)}`,
     },
     {
       field: 'latencyMs',
       headerName: 'Latency',
       width: 105,
-      valueFormatter: (params) => `${params.value}ms`,
+      valueFormatter: (params) => (params.value == null ? '—' : `${params.value}ms`),
     },
     { field: 'evalPassed', headerName: 'Judge', width: 95 },
     { field: 'traceId', headerName: 'Dynatrace trace', flex: 1 },

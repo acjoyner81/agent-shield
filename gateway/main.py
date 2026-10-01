@@ -20,7 +20,8 @@ from pydantic import BaseModel, ConfigDict
 from config.settings import settings
 from gateway.auth import verify_jwt, resolve_active_tenant, require_permission
 from gateway.rate_limit import verify_rate_limit
-from gateway.telemetry import emit_request_completed, emit_token_usage
+from gateway.pricing import estimate_cost_usd
+from gateway.telemetry import HISTORY_LIMIT, emit_request_completed, emit_token_usage
 from gateway.webhooks import router as webhook_router
 from gateway.billing import router as billing_router
 from gateway.metering import router as metering_router
@@ -504,6 +505,20 @@ async def execute_tool(
         )
         raise e
 
+def _audit_event_id(item: dict, raw: str) -> str:
+    """A short, stable id for an audit row.
+
+    Rows written by the gateway carry the CloudEvent's own id, so the value the
+    user reads traces back to the event that Splunk received. Rows that predate
+    that (the Tripwire ingest path posts a bare payload) fall back to hashing
+    the stored text, which is all that is available for them.
+    """
+    event_id = item.get("event_id")
+    if isinstance(event_id, str) and event_id:
+        return f"EVT-{event_id.removeprefix('evt_')[:8]}"
+    return f"EVT-{hashlib.sha256(raw.encode()).hexdigest()[:8]}"
+
+
 @app.get("/v1/telemetry/logs", include_in_schema=False)
 @app.get("/api/v1/telemetry/logs", include_in_schema=False)
 async def get_telemetry_logs(
@@ -520,14 +535,22 @@ async def get_telemetry_logs(
                 continue
             if item.get("tenant_id") != tenant_id:
                 continue
+            # Only an LLM call has a cost. A key rotation priced at $0.0000 was a
+            # fabricated figure on a row that never spent anything.
+            cost_usd = None
+            if item.get("model") and item.get("total_tokens") is not None:
+                cost_usd = estimate_cost_usd(str(item["model"]), int(item["total_tokens"]))
             history.append(
                 {
-                    "eventId": f"EVT-{hashlib.sha256(raw.encode()).hexdigest()[:8]}",
+                    "eventId": _audit_event_id(item, raw),
                     "timestamp": item.get("timestamp", ""),
                     "tenantId": item.get("tenant_id", ""),
-                    "costUsd": 0.0,
-                    "statusCode": item.get("status_code", 200),
-                    "latencyMs": item.get("latency_ms", 0),
+                    "costUsd": cost_usd,
+                    # Absent means absent. Defaulting to 200/0 claimed every
+                    # event was a successful request of zero latency, including
+                    # rate limit drops and denied calls.
+                    "statusCode": item.get("status_code"),
+                    "latencyMs": item.get("latency_ms"),
                     "evalPassed": item.get("eval_passed"),
                     "message": item.get("message", ""),
                     "traceId": item.get("trace_id", ""),
@@ -563,7 +586,7 @@ async def post_telemetry_logs(payload: TelemetryPayload) -> dict[str, str]:
 
     # Also keep a short-term history in Redis for the GET endpoint to eventually use
     r.lpush("telemetry_history", json.dumps(payload.model_dump()))
-    r.ltrim("telemetry_history", 0, 99) # Keep last 100
+    r.ltrim("telemetry_history", 0, HISTORY_LIMIT - 1) # Keep last HISTORY_LIMIT
     
     return {"status": "accepted"}
 

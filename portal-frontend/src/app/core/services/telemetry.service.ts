@@ -7,10 +7,14 @@ export interface TelemetryLog {
   eventId: string;
   timestamp: string;
   tenantId: string;
-  costUsd: number;
-  statusCode: number;
-  latencyMs: number;
-  evalPassed: boolean;
+  message: string;
+  /** Null when the event was never an HTTP response, e.g. a key rotation. */
+  costUsd: number | null;
+  /** Null when the event was never an HTTP response, e.g. a token usage row. */
+  statusCode: number | null;
+  /** Null when the event carries no measured latency, e.g. a key rotation. */
+  latencyMs: number | null;
+  evalPassed: boolean | null;
   traceId: string;
 }
 
@@ -73,8 +77,16 @@ export class TelemetryService {
   /** True once a fetch has succeeded at least once, so empty can mean either thing. */
   readonly logsLoaded = signal(false);
 
-  readonly totalSpend = computed(() => this.logs().reduce((sum, log) => sum + log.costUsd, 0));
-  readonly failedRequests = computed(() => this.logs().filter((log) => log.statusCode === 429 || log.statusCode >= 500).length);
+  /** Only rows that actually carry a cost contribute; a key rotation costs nothing. */
+  readonly totalSpend = computed(() =>
+    this.logs().reduce((sum, log) => sum + (log.costUsd ?? 0), 0),
+  );
+  readonly failedRequests = computed(
+    () =>
+      this.logs().filter(
+        (log) => log.statusCode === 429 || (log.statusCode != null && log.statusCode >= 500),
+      ).length,
+  );
   readonly passRate = computed(() => {
     const entries = this.logs();
     return entries.length ? Math.round((entries.filter((log) => log.evalPassed).length / entries.length) * 100) : 0;

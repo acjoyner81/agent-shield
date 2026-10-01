@@ -8,6 +8,10 @@ from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger("agentshield.telemetry")
 
+# How many rows the portal's audit stream retains. Matches the trim the POST
+# /v1/telemetry/logs ingest path applies, so both writers agree on the cap.
+HISTORY_LIMIT = 100
+
 VALID_EVENT_TYPES = {
     "agentshield.telemetry.request.completed",
     "agentshield.token.usage",
@@ -88,6 +92,62 @@ class EventEnvelope(BaseModel):
         return v
 
 
+# The audit stream the portal renders is a flat projection of these CloudEvents,
+# read by gateway.main.get_telemetry_logs. A status code and a latency belong
+# only to events that correspond to an HTTP outcome: a key rotation is not a
+# response, and defaulting it to 200/0 made the Status and Latency columns
+# assert a successful request that never happened.
+_STATUS_BY_TYPE = {
+    EventType.RATE_LIMIT_EXCEEDED.value: 429,
+    EventType.AUTHZ_FAILURE.value: 403,
+}
+
+
+def _summarize(event_type: str, data: Dict[str, Any]) -> str:
+    """One human-readable line per event type, for the stream's Message column."""
+    if event_type == EventType.REQUEST_COMPLETED.value:
+        return f"{data.get('method', '')} {data.get('path', '')}".strip()
+    if event_type == EventType.TOKEN_USAGE.value:
+        return f"{data.get('total', 0)} tokens via {data.get('model', 'unknown model')}"
+    if event_type == EventType.KEY_ROTATION.value:
+        action = data.get("action", "changed")
+        return f"API key {data.get('key_id', 'unknown')} {action} ({data.get('status', 'unknown')})"
+    if event_type == EventType.RATE_LIMIT_EXCEEDED.value:
+        return "Rate limit exceeded; request dropped"
+    if event_type == EventType.AUTHZ_FAILURE.value:
+        return "Authorization failed; request denied"
+    if event_type == EventType.SUBSCRIPTION_CHANGED.value:
+        return f"Subscription {data.get('action', 'changed')}"
+    return event_type
+
+
+def _history_row(envelope: EventEnvelope) -> Dict[str, Any]:
+    """Flatten an envelope into the row shape the portal's audit stream reads."""
+    data = envelope.data or {}
+    row: Dict[str, Any] = {
+        "event_id": envelope.event_id,
+        "tenant_id": envelope.tenant_id,
+        "type": envelope.type,
+        "timestamp": envelope.timestamp,
+        "message": _summarize(envelope.type, data),
+        "trace_id": envelope.trace_id or "",
+    }
+
+    if envelope.type == EventType.REQUEST_COMPLETED.value:
+        row["status_code"] = data.get("status_code")
+        row["latency_ms"] = data.get("latency_ms")
+    elif envelope.type in _STATUS_BY_TYPE:
+        row["status_code"] = _STATUS_BY_TYPE[envelope.type]
+
+    if envelope.type == EventType.TOKEN_USAGE.value:
+        # Carried, not priced. Spec 0011 recomputes cost from the rate card on
+        # every read so an edited price card changes the next response.
+        row["model"] = data.get("model")
+        row["total_tokens"] = data.get("total")
+
+    return row
+
+
 def emit_event(
     tenant_id: str,
     event_type: str,
@@ -125,6 +185,18 @@ def emit_event(
             client.xadd("telemetry:queue", {"payload": payload})
         except Exception as e:
             logger.error(f"Failed to push to Redis stream: {e}")
+
+        # The portal's audit stream reads telemetry_history, and the aggregator
+        # only ever ships to Splunk, so nothing downstream ever wrote it. Every
+        # gateway event therefore missed the page the user is looking at, and it
+        # did so silently: the route returned an honest empty list. The local
+        # read model belongs to the producer, written here beside the enqueue,
+        # so the stream renders whether or not the aggregator and Splunk are up.
+        try:
+            client.lpush("telemetry_history", json.dumps(_history_row(envelope)))
+            client.ltrim("telemetry_history", 0, HISTORY_LIMIT - 1)
+        except Exception as e:
+            logger.error(f"Failed to append to telemetry history: {e}")
     else:
         logger.debug(f"Telemetry payload (unbuffered): {payload}")
 
