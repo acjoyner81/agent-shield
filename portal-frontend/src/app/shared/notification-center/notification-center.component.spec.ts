@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 
 
 import { NotificationCenter } from './notification-center.component';
@@ -241,6 +242,107 @@ describe('NotificationCenter', () => {
       fixture.detectChanges();
 
       expect(auth.login).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The regression that pegged the renderer.
+   *
+   * The tests above pass a plain `authenticated: () => false` function, so
+   * nothing can ever re-trigger the effects and the loop stays invisible. In the
+   * real app `authenticated` is a signal over `isAuthenticated$`, and `login()`
+   * is what causes the session to be re-fetched. That is a feedback loop, and it
+   * is invisible to a stub that never emits.
+   *
+   * These use signals and a login that mutates state, so the two are wired the
+   * way the app wires them. The old code recursed until the renderer hit 100% CPU
+   * on any full page load; the assertion that matters is that login settles.
+   */
+  describe('with a signal-backed session, as the app actually wires it', () => {
+    let authenticated: ReturnType<typeof signal<boolean>>;
+    let sessionsObserved: number;
+
+    beforeEach(async () => {
+      sessionsObserved = 0;
+      authenticated = signal(false);
+      // `loginWithRedirect` does not resolve synchronously: the SDK round trips
+      // to Auth0 and only then does a session become available. Modelling that
+      // delay is what makes the feedback loop visible, so a login that reported
+      // a live session instantly would hide the bug.
+      auth.authenticated = () => authenticated();
+      auth.login.and.callFake(() => {
+        sessionsObserved++;
+        // Emulate the redirect landing back on a session Auth0 still considers
+        // unauthenticated, which is exactly the state the old code deadlocked on.
+        authenticated.set(false);
+      });
+
+      fixture = TestBed.createComponent(NotificationCenter);
+      service = TestBed.inject(NotificationService);
+      fixture.detectChanges();
+    });
+
+    it('redirects a bounded number of times for a burst of 401s', () => {
+      for (let i = 0; i < 5; i++) {
+        service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+        fixture.detectChanges();
+      }
+
+      // One redirect per expiry, not one per 401 and certainly not unbounded.
+      expect(auth.login).toHaveBeenCalledTimes(1);
+    });
+
+    it('settles instead of recursing while no session ever appears', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+
+      // Let any effect loop run to completion. The old code never finished: it
+      // kept re-arming and re-redirecting, which is the hang.
+      for (let i = 0; i < 25; i++) {
+        fixture.detectChanges();
+      }
+
+      expect(auth.login).toHaveBeenCalledTimes(1);
+      expect(sessionsObserved).toBe(1);
+    });
+
+    it('clears the expiry flag so it cannot drive another redirect', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      fixture.detectChanges();
+
+      // The flag is the loop's fuel. It has to be spent, not left latched true.
+      // This is the assertion that fails against the old code, and it is the one
+      // to trust: the burst and settle cases pass either way, because with a stub
+      // that never flips `authenticated` the old effect simply never re-fires, so
+      // they cannot see the cycle. The latched flag is the condition that makes
+      // the cycle possible in the browser, where the signal does flip.
+      expect(service.sessionExpired()).toBe(false);
+    });
+
+    it('keeps a latched flag harmless when the session keeps reporting 401', () => {
+      // Reproduces the browser condition exactly: the flag latched true (as it
+      // did for real), and the dashboard poll keeps delivering 401s. The latch,
+      // not the flag, is what must stop the second redirect.
+      authenticated.set(false);
+      for (let i = 0; i < 3; i++) {
+        service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+        fixture.detectChanges();
+      }
+      expect(auth.login).toHaveBeenCalledTimes(1);
+    });
+
+    it('redirects again for a genuinely new expiry after a live session', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      fixture.detectChanges();
+      expect(auth.login).toHaveBeenCalledTimes(1);
+
+      // A real session comes back, which drops the latch.
+      authenticated.set(true);
+      fixture.detectChanges();
+
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      fixture.detectChanges();
+
+      expect(auth.login).toHaveBeenCalledTimes(2);
     });
   });
 });

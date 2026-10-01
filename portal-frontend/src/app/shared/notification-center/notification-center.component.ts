@@ -167,6 +167,15 @@ export class NotificationCenter {
   // depends on one abstraction and the shell's existing test double covers it.
   private readonly auth = inject(AuthService);
 
+  /**
+   * Latch: has this component already sent a redirect for the current expiry?
+   *
+   * Instance state, not signal state, on purpose. A signal would be read by the
+   * effect that writes it, which is exactly the cycle that pegged the renderer.
+   * Plain field, so no effect can depend on it.
+   */
+  private redirectSent = false;
+
   constructor() {
     // The 401 consequence, and the only place in the app that acts on it.
     //
@@ -176,35 +185,44 @@ export class NotificationCenter {
     // produced neither a redirect nor an explanation, and the specs missed it
     // because they assert the signal rather than the navigation it implies.
     //
-    // Keyed on the signal, so it fires once per transition to true.
-    //
-    // The flag is deliberately NOT acknowledged here. Resetting it before the
-    // navigation completes re-arms the guard while the app is still on its way
-    // out, so a second 401 from a concurrent poll starts a second redirect: a
-    // storm of authorization round trips. It is acknowledged below instead, once
-    // a live session is confirmed.
-    //
     // Only 401 redirects. A 403 must not re-authenticate: the session is valid
     // and simply lacks the scope, so sending the user through Auth0 again lands
     // them back here with the same refusal, which is the loop Spec 0013 forbids.
+    //
+    // The flag is acknowledged BEFORE navigating, not after, which inverts the
+    // previous design. Acknowledging afterwards meant the only thing that could
+    // clear the flag was a live session, and `authenticated` reads
+    // `isAuthenticated$` -- permanently false for a real Auth0 token, because it
+    // asks for a `user` claim the token does not carry. So the flag stayed true
+    // forever, this effect re-fired `login()` forever, and on a full page load
+    // the renderer wedged in unbounded recursion at 100% CPU.
+    //
+    // `redirectSent` covers the case acknowledging cannot: concurrent 401s from
+    // a poll landing between the acknowledge and the navigation completing.
+    // It is dropped once a session is genuinely live so a later, real expiry
+    // still redirects.
     effect(() => {
-      if (!this.notifications.sessionExpired()) {
+      if (!this.notifications.sessionExpired() || this.redirectSent) {
         return;
       }
+      this.redirectSent = true;
+      // Inside untracked so the write does not re-trigger this effect; the flag
+      // is cleared in the same tick the redirect is issued.
+      untracked(() => this.notifications.acknowledgeSessionExpiry());
       this.auth.login();
     });
 
-    // Re-arm the guard, but only against a session that is actually live again.
-    //
-    // Acknowledging on the transition into an authenticated state means a genuine
-    // second expiry still redirects, while the repeat 401s of a single expiry do
-    // not: they all land while the flag is already true and the effect above has
-    // nothing to react to.
+    // Drop the latch on a live session, so a genuine second expiry can redirect
+    // again. Reading `authenticated` is safe here: it is not written by this
+    // effect, and `untracked` keeps the latch write out of the dependency set.
     effect(() => {
       if (!this.auth.authenticated()) {
         return;
       }
-      untracked(() => this.notifications.acknowledgeSessionExpiry());
+      untracked(() => {
+        this.redirectSent = false;
+        this.notifications.acknowledgeSessionExpiry();
+      });
     });
   }
 
