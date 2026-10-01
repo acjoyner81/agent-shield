@@ -41,34 +41,39 @@ export const environment = {
     // the whole reason this file is not just a copy of the production one.
     authorizationParams: {
       audience: 'https://api.agentshield.local',
-      // Keyed BY AUDIENCE, and this is load bearing.
+      // Keyed BY AUDIENCE, and both halves of that are load bearing.
       //
-      // `auth0-spa-js` builds an audience -> scope map at construction via
-      // `injectDefaultScopes(authorizationParams.scope, 'openid', ...)`. Given a
-      // STRING it keys that map by the literal `DEFAULT_AUDIENCE` ("default") and
-      // nothing else. `_getIdTokenFromCache` then looks up
+      // The object form: `auth0-spa-js` builds an audience -> scope map at
+      // construction via `injectDefaultScopes(authorizationParams.scope, 'openid',
+      // ...)`. Given a STRING it keys that map by the literal `DEFAULT_AUDIENCE`
+      // ("default") and nothing else. `_getIdTokenFromCache` then looks up
       // `this.scope['https://api.agentshield.local']`, gets `undefined`, and
       // builds a cache key with the scope omitted, so the lookup misses an entry
       // whose key does include the scope.
       //
-      // The object form keys the map by the real audience. Confirmed by reading
-      // the SDK: `getUniqueScopes('openid', 'openid profile email', <empty session
-      // scope>)` dedupes to exactly `'openid profile email'`, which is the string
-      // the stored entry is keyed by.
+      // The value, `openid` alone: asking for `openid profile email` put the
+      // request one scope away from a consent wall. `auth0-spa-js` keys its
+      // token cache by `clientId::audience::scope`, so a request for
+      // `openid profile email` cannot see the token already cached under
+      // `openid` and falls through to a silent renewal on every single call.
+      // Silent means `prompt=none`, which by definition cannot render a consent
+      // screen, so Auth0 answered `consent_required`, no token was cached, and
+      // the SPA never issued the API request at all. Every page then rendered
+      // zeros with no error shown, because the polls are marked SILENT_POLL.
       //
-      // STILL OPEN, and this comment should not be read as claiming otherwise: a
-      // full page load of a guarded route still restarts authorization. Keying the
-      // scope correctly is necessary but not sufficient. A deeper, separate
-      // defect sits behind it -- the gateway answers every authenticated call
-      // with 403 "Token missing mandatory tenant identification claim", because
-      // this Auth0 tenant issues no tenant claim for the API to read. Until the
-      // token carries one, the portal has an authenticated session it cannot use.
-      // See `core/guards/auth.guard.ts` for why `isAuthenticated$` is unusable
-      // regardless.
+      // Nothing here reads `profile` or `email`. `AuthService.userName` falls
+      // back through name -> nickname -> email to a literal, and the cached user
+      // object carries only `tenant_id` and `sub` anyway, so those scopes bought
+      // nothing that was working. The shipping `environment.ts` asks for no
+      // scope at all and so already resolves to `openid`; this line brings the
+      // dev build back in line with it instead of diverging.
+      //
+      // If a real display name is wanted later, stamp one from the Post-Login
+      // Action rather than re-adding a scope that reintroduces the wall.
       //
       // A string here is the trap: it typechecks, and it looks right.
       scope: {
-        'https://api.agentshield.local': 'openid profile email',
+        'https://api.agentshield.local': 'openid',
       },
       redirect_uri: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:4200'
     }
