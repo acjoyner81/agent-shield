@@ -1,5 +1,5 @@
 import { inject } from '@angular/core';
-import { CanActivateFn, Router } from '@angular/router';
+import { CanActivateFn } from '@angular/router';
 import { Auth0ClientService } from '@auth0/auth0-angular';
 import { catchError, from, map, of } from 'rxjs';
 
@@ -41,13 +41,22 @@ import { catchError, from, map, of } from 'rxjs';
  */
 export const authGuard: CanActivateFn = () => {
   const client = inject(Auth0ClientService);
-  const router = inject(Router);
+
+  // There is no signed-out landing page to send anyone to: `''` redirects to
+  // `dashboard`, which is guarded, so a `UrlTree` aimed at `/` bounces straight
+  // back here and spins. Start the login flow instead and refuse the route,
+  // which is what the stock guard did once it had correctly decided the user is
+  // signed out.
+  const signIn = () => {
+    void Promise.resolve(client.loginWithRedirect()).catch(() => undefined);
+    return false;
+  };
 
   return from(client.getIdTokenClaims()).pipe(
-    map((claims) => (claims ? true : router.createUrlTree(['/']))),
+    map((claims) => (claims ? true : signIn())),
     // A cache read should not reject, but a rejected guard observable cancels
-    // navigation outright. Treat any failure as "no session" instead, which is
-    // the same decision the guard would have made anyway.
-    catchError(() => of(router.createUrlTree(['/']))),
+    // navigation outright and leaves the user on a blank page. An unreadable
+    // cache is still an absent session, so sign in rather than dead-end.
+    catchError(() => of(signIn())),
   );
 };

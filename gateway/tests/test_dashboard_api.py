@@ -95,6 +95,14 @@ def model_key(tenant: str, date: str, model: str) -> str:
     return f"usage:daily:{tenant}:{date}:{model}"
 
 
+# The seeds below are dated 2026-09-20, and `/summary` defaults to the current
+# month start through today (metering.py:288-291). Every call that goes through
+# the endpoint therefore has to name its window, or it silently reads an empty
+# range once the calendar rolls past September. The direct
+# `get_tenant_usage_summary` calls pass the same range positionally.
+SEPTEMBER = {"start_date": "2026-09-01", "end_date": "2026-09-30"}
+
+
 class TestPricing:
     """AC-1: cost comes from the rate card at read time."""
 
@@ -267,7 +275,7 @@ class TestUsageSummaryCost:
         app.dependency_overrides[resolve_active_tenant] = tenant_principal(BILLING_ADMIN_CLAIMS)
         try:
             with patch("gateway.metering.get_redis_client", return_value=r):
-                response = client.get("/v1/usage/summary")
+                response = client.get("/v1/usage/summary", params=SEPTEMBER)
         finally:
             app.dependency_overrides.pop(resolve_active_tenant, None)
 
@@ -282,7 +290,7 @@ class TestUsageSummaryCost:
         """AC-2, AC-6: usage visible, spend withheld, not a 403."""
         r = self.seed(scripted_redis)
         with patch("gateway.metering.get_redis_client", return_value=r):
-            response = client.get("/v1/usage/summary", headers=DEV_HEADERS)
+            response = client.get("/v1/usage/summary", headers=DEV_HEADERS, params=SEPTEMBER)
 
         assert response.status_code == 200
         body = response.json()
@@ -294,7 +302,9 @@ class TestUsageSummaryCost:
     def test_endpoint_nulls_cost_for_unprivileged_principal(self, scripted_redis):
         r = self.seed(scripted_redis)
         with patch("gateway.metering.get_redis_client", return_value=r):
-            response = client.get("/v1/usage/summary", headers=UNPRIVILEGED_HEADERS)
+            response = client.get(
+                "/v1/usage/summary", headers=UNPRIVILEGED_HEADERS, params=SEPTEMBER
+            )
 
         assert response.status_code == 200
         assert response.json()["totals"]["estimated_cost_usd"] is None
@@ -394,14 +404,14 @@ class TestUsageSummaryCounters:
         app.dependency_overrides[resolve_active_tenant] = tenant_principal(BILLING_ADMIN_CLAIMS)
         try:
             with patch("gateway.metering.get_redis_client", return_value=r):
-                alpha = client.get("/v1/usage/summary")
+                alpha = client.get("/v1/usage/summary", params=SEPTEMBER)
         finally:
             app.dependency_overrides.pop(resolve_active_tenant, None)
 
         app.dependency_overrides[resolve_active_tenant] = tenant_principal(TENANT_B_HEADERS_CLAIMS)
         try:
             with patch("gateway.metering.get_redis_client", return_value=r):
-                beta = client.get("/v1/usage/summary")
+                beta = client.get("/v1/usage/summary", params=SEPTEMBER)
         finally:
             app.dependency_overrides.pop(resolve_active_tenant, None)
 

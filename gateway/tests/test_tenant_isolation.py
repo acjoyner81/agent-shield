@@ -96,13 +96,19 @@ def two_tenants(fake_redis):
     # Daily aggregate hashes are `usage:daily:{tenant}:{date}:{model}`
     # (metering.py:20), and the summary scans that pattern rather than reading a
     # single key, so the seed has to use the real key shape.
+    #
+    # The hash fields must match what the roll-up actually writes and what the
+    # summary reads back: `input_tokens`, `output_tokens`, `total_tokens`, and
+    # `request_count` (metering.py:190-193 and :326-329). The short forms
+    # (`input`, `requests`) were silently dropped by the reader, which is why
+    # both tenants came back with identical zeroed totals.
     fake_redis.hset(
         f"usage:daily:{TENANT_ALPHA}:2026-09-30:gpt-4o-mini",
-        mapping={"input": 600, "output": 600, "total": 1200, "requests": 11},
+        mapping={"input_tokens": 600, "output_tokens": 600, "total_tokens": 1200, "request_count": 11},
     )
     fake_redis.hset(
         f"usage:daily:{TENANT_BETA}:2026-09-30:gpt-4o-mini",
-        mapping={"input": 1200, "output": 1200, "total": 2400, "requests": 22},
+        mapping={"input_tokens": 1200, "output_tokens": 1200, "total_tokens": 2400, "request_count": 22},
     )
     fake_redis.hset(
         f"usage:daily:{TENANT_ALPHA}:2026-09-30:__meta__",
@@ -117,6 +123,13 @@ def two_tenants(fake_redis):
 
 ALPHA = {"X-Tenant-API-Key": ALPHA_SECRET}
 BETA = {"X-Tenant-API-Key": BETA_SECRET}
+
+# The daily seeds are dated 2026-09-30, and `/summary` defaults to the current
+# month start through today (metering.py:288-291), so every call that goes
+# through the endpoint has to name its window. Without it the read covers an
+# empty range and the cross-tenant assertions below pass or fail on zeros
+# rather than on the values each tenant was actually seeded with.
+SEPTEMBER = {"start_date": "2026-09-01", "end_date": "2026-09-30"}
 
 
 class _UnavailableStore:
@@ -181,8 +194,8 @@ class TestUsageSummaryIsolation:
 
     @pytest.mark.parametrize("path", ["/v1/usage/summary", "/api/v1/usage/summary"])
     def test_summary_reports_the_callers_own_tenant(self, two_tenants, path):
-        alpha = client.get(path, headers=ALPHA)
-        beta = client.get(path, headers=BETA)
+        alpha = client.get(path, headers=ALPHA, params=SEPTEMBER)
+        beta = client.get(path, headers=BETA, params=SEPTEMBER)
 
         assert alpha.status_code == 200
         assert beta.status_code == 200
@@ -192,10 +205,26 @@ class TestUsageSummaryIsolation:
 
     def test_totals_are_not_a_tenants_siblings(self, two_tenants):
         """Alpha and beta were seeded with distinct request counts; catch a shared roll-up."""
-        alpha = client.get("/v1/usage/summary", headers=ALPHA).json()
-        beta = client.get("/v1/usage/summary", headers=BETA).json()
+        alpha = client.get("/v1/usage/summary", headers=ALPHA, params=SEPTEMBER).json()
+        beta = client.get("/v1/usage/summary", headers=BETA, params=SEPTEMBER).json()
 
         assert alpha["totals"] != beta["totals"], "both tenants returned the same usage totals"
+
+    def test_each_tenant_reads_back_the_tokens_it_was_seeded_with(self, two_tenants):
+        """The stronger form of the assertion above, so zeros cannot satisfy it.
+
+        `test_totals_are_not_a_tenants_siblings` only asks the two totals to
+        differ, which two identically empty reads also satisfy. This pins each
+        tenant to its own seeded figures, so a roll-up that silently returns
+        nothing fails here instead of passing on a coincidental mismatch.
+        """
+        alpha = client.get("/v1/usage/summary", headers=ALPHA, params=SEPTEMBER).json()
+        beta = client.get("/v1/usage/summary", headers=BETA, params=SEPTEMBER).json()
+
+        assert alpha["totals"]["total_tokens"] == 1200
+        assert alpha["totals"]["total_requests"] == 11
+        assert beta["totals"]["total_tokens"] == 2400
+        assert beta["totals"]["total_requests"] == 22
 
 
 class TestKeyIsolation:
@@ -274,7 +303,7 @@ class TestFallbacksAreEmptyNotInvented:
             patcher.setattr(main_module, "r", _UnavailableStore())
 
             failing = TestClient(app, raise_server_exceptions=False)
-            response = failing.get(path, headers=ALPHA)
+            response = failing.get(path, headers=ALPHA, params=SEPTEMBER)
 
         # Either the route fails closed or it answers with nothing borrowed.
         # What it must never do is serve tenant B's rows.

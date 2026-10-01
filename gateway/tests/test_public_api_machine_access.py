@@ -258,7 +258,11 @@ def test_machine_key_with_billing_admin_sees_cost(fake_redis):
     with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
         response = client.get(
             "/v1/usage/summary",
-            headers={**MACHINE_HEADERS, "start_date": "2026-09-01", "end_date": "2026-12-31"},
+            headers=MACHINE_HEADERS,
+            # The seed is dated 2026-09-24 and the endpoint defaults to the
+            # current month, so the window has to be a query parameter. Sent as
+            # headers it was ignored and the read returned an empty range.
+            params={"start_date": "2026-09-01", "end_date": "2026-12-31"},
         )
 
     assert response.status_code == 200, response.text
@@ -276,7 +280,8 @@ def test_machine_key_without_billing_admin_sees_no_cost(fake_redis):
     with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
         response = client.get(
             "/v1/usage/summary",
-            headers={**MACHINE_HEADERS, "start_date": "2026-09-01", "end_date": "2026-12-31"},
+            headers=MACHINE_HEADERS,
+            params={"start_date": "2026-09-01", "end_date": "2026-12-31"},
         )
 
     assert response.status_code == 200, response.text

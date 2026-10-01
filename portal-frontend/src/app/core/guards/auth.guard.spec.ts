@@ -15,12 +15,15 @@ import { authGuard } from './auth.guard';
  * and restarts authorization on every page load.
  *
  * So the two things worth pinning are that a cached session is admitted, and that
- * a missing one is still refused. Refusing is the part that must not regress: a
- * guard that admits everything would look identical in a demo and be a hole.
+ * a missing one still starts a login. The second matters just as much: an
+ * earlier version of this guard answered a missing session with
+ * `createUrlTree(['/'])`, and since `''` redirects to the guarded `dashboard`
+ * route, that bounced `/` -> `/dashboard` -> `/` in a loop. The tests below hold
+ * the sign-in path in place.
  */
 describe('authGuard', () => {
   let claims: Record<string, unknown> | undefined;
-  let client: { getIdTokenClaims: jasmine.Spy };
+  let client: { getIdTokenClaims: jasmine.Spy; loginWithRedirect: jasmine.Spy };
   let router: Router;
 
   const run = () =>
@@ -28,7 +31,10 @@ describe('authGuard', () => {
 
   beforeEach(() => {
     claims = { sub: 'google-oauth2|1', name: 'A J' };
-    client = { getIdTokenClaims: jasmine.createSpy('getIdTokenClaims').and.callFake(async () => claims) };
+    client = {
+      getIdTokenClaims: jasmine.createSpy('getIdTokenClaims').and.callFake(async () => claims),
+      loginWithRedirect: jasmine.createSpy('loginWithRedirect').and.resolveTo(undefined),
+    };
 
     TestBed.configureTestingModule({
       providers: [provideRouter([]), { provide: Auth0ClientService, useValue: client }],
@@ -41,19 +47,32 @@ describe('authGuard', () => {
     expect(result).toBe(true);
   });
 
-  it('refuses the route when there is no cached session', async () => {
-    claims = undefined;
-    const result = await firstValueFrom(run());
-    expect(result).toEqual(router.createUrlTree(['/']));
+  it('does not start a login when a session is cached', async () => {
+    await firstValueFrom(run());
+    expect(client.loginWithRedirect).not.toHaveBeenCalled();
   });
 
-  it('refuses rather than throwing when reading the cache fails', async () => {
+  it('refuses the route and starts a login when there is no cached session', async () => {
+    claims = undefined;
+    const result = await firstValueFrom(run());
+    expect(result).toBe(false);
+    expect(client.loginWithRedirect).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses rather than dead-ending when reading the cache fails', async () => {
     // A rejected guard observable cancels navigation outright, which would leave
     // the user on a blank page instead of being sent to sign in.
     client.getIdTokenClaims.and.callFake(async () => {
       throw new Error('cache unavailable');
     });
     const result = await firstValueFrom(run());
-    expect(result).toEqual(router.createUrlTree(['/']));
+    expect(result).toBe(false);
+    expect(client.loginWithRedirect).toHaveBeenCalledTimes(1);
+  });
+
+  it('never returns a UrlTree, which would loop against the / redirect', async () => {
+    claims = undefined;
+    const result = await firstValueFrom(run());
+    expect(result).not.toEqual(router.createUrlTree(['/']));
   });
 });

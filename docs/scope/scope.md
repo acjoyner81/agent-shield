@@ -15,8 +15,8 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 1 | Telemetry Standard | Foundation | planned |
 | 2 | Redis to Splunk Aggregator | Slice 1 | in-progress |
 | 3 | End to End Flow | Slice 1 | planned |
-| 4 | Auth0 Integration | Slice 2 | planned |
-| 5 | RBAC Enforcement | Slice 2 | planned |
+| 4 | Auth0 Integration | Slice 2 | done |
+| 5 | RBAC Enforcement | Slice 2 | in-progress |
 | 6 | Hybrid Stripe Integration | Slice 3 | in-progress |
 | 7 | Tenant Rate Limiting | Slice 3 | done |
 | 8 | Usage Metering | Slice 3 | done |
@@ -79,7 +79,7 @@ Integrate Auth0 for authentication and map JWT claims to tenant roles (tenant ad
    - [x] Implement verified tenant binding logic
    - [x] Wire authenticated context to telemetry
 - [x] Verify it: `/check verify auth0 integration`
-- [ ] Test it: `/test auth0 integration`
+- [x] Test it: `/test auth0 integration` — run 2026-10-01. Added `gateway/tests/test_auth0.py` (32 tests) with real RSA-signed tokens, so `jwt.decode` runs for real instead of being handed claims. Covers signature, expiry, audience, issuer, the 403 missing-claim branch, the pre-rename claim name, and `permissions` normalisation. Suite is 328 passing with 6 live e2e tests.
 Spec 0004 · code in `gateway/main.py`
 
 ### 5. RBAC Enforcement · in-progress · GA
