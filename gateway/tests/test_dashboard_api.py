@@ -34,13 +34,13 @@ UNPRIVILEGED_HEADERS = {"Authorization": "Bearer dev-unprivileged-token"}  # per
 
 BILLING_ADMIN_CLAIMS = {
     "sub": "user_admin_1",
-    "https://agentshield.com/tenant_id": "tenant_alpha",
+    "https://api.agentshield.local/tenant_id": "tenant_alpha",
     "permissions": ["tools:execute", "billing:admin"],
 }
 
 TENANT_B_HEADERS_CLAIMS = {
     "sub": "user_admin_2",
-    "https://agentshield.com/tenant_id": "tenant_beta",
+    "https://api.agentshield.local/tenant_id": "tenant_beta",
     "permissions": ["billing:admin"],
 }
 
@@ -53,7 +53,7 @@ def tenant_principal(claims):
     rather than `verify_jwt`.
     """
     async def _resolve(request: Request) -> str:
-        tenant_id = claims["https://agentshield.com/tenant_id"]
+        tenant_id = claims["https://api.agentshield.local/tenant_id"]
         request.state.tenant_id = tenant_id
         request.state.user_id = claims["sub"]
         request.state.permissions = set(claims.get("permissions", []))

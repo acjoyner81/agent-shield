@@ -44,13 +44,13 @@ def verify_token_credentials(token: str) -> dict[str, object]:
         if token == "dev-mock-token":
             return {
                 "sub": "user_dev_123",
-                "https://agentshield.com/tenant_id": "tenant_alpha",
+                "https://api.agentshield.local/tenant_id": "tenant_alpha",
                 "permissions": ["tools:execute", "logs:read", "keys:write"],
             }
         if token == "dev-unprivileged-token":
             return {
                 "sub": "user_dev_456",
-                "https://agentshield.com/tenant_id": "tenant_alpha",
+                "https://api.agentshield.local/tenant_id": "tenant_alpha",
                 "permissions": ["logs:read"],
             }
 
@@ -64,7 +64,7 @@ def verify_token_credentials(token: str) -> dict[str, object]:
             issuer=settings.auth0_issuer,
         )
 
-        tenant_id = claims.get("https://agentshield.com/tenant_id")
+        tenant_id = claims.get("https://api.agentshield.local/tenant_id")
         if not tenant_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -87,7 +87,7 @@ def verify_jwt(
 
 def _bind_tenant_state(request: Request, claims: dict[str, object]) -> str:
     """Bind a verified principal's tenant, user, and permissions to request state."""
-    tenant_id = str(claims.get("https://agentshield.com/tenant_id"))
+    tenant_id = str(claims.get("https://api.agentshield.local/tenant_id"))
     user_id = str(claims.get("sub"))
 
     request.state.tenant_id = tenant_id

@@ -74,7 +74,7 @@ bind_client = TestClient(bind_app)
 def make_claims(permissions, sub="user_rbac", tenant="tenant_rbac") -> dict:
     return {
         "sub": sub,
-        "https://agentshield.com/tenant_id": tenant,
+        "https://api.agentshield.local/tenant_id": tenant,
         "permissions": permissions,
     }
 
@@ -82,10 +82,10 @@ def make_claims(permissions, sub="user_rbac", tenant="tenant_rbac") -> dict:
 def make_resolver(claims):
     """Returns a resolve_active_tenant override that binds the given claims."""
     async def _resolve(request: Request) -> str:
-        request.state.tenant_id = claims["https://agentshield.com/tenant_id"]
+        request.state.tenant_id = claims["https://api.agentshield.local/tenant_id"]
         request.state.user_id = claims["sub"]
         request.state.permissions = set(claims.get("permissions", []))
-        return claims["https://agentshield.com/tenant_id"]
+        return claims["https://api.agentshield.local/tenant_id"]
     return _resolve
 
 

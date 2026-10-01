@@ -44,7 +44,7 @@ either a user Bearer token or a tenant machine key.
 **Tenant resolution**
 
 A caller-supplied `X-Tenant-ID` header is **never authoritative** and is ignored. The
-tenant always comes from the verified JWT claim `https://agentshield.com/tenant_id` or
+tenant always comes from the verified JWT claim `https://api.agentshield.local/tenant_id` or
 from the key store, so you cannot act on behalf of another tenant by setting a header.
 
 **Scopes**
@@ -283,7 +283,7 @@ def custom_openapi():
             "bearerFormat": "JWT",
             "description": (
                 "User authentication via an Auth0 access token. The tenant is read from "
-                "the verified `https://agentshield.com/tenant_id` claim; a caller-supplied "
+                "the verified `https://api.agentshield.local/tenant_id` claim; a caller-supplied "
                 "`X-Tenant-ID` header is never authoritative and is ignored. When this "
                 "header is present alongside `X-Tenant-API-Key`, this token takes precedence."
             ),

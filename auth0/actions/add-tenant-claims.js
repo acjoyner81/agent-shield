@@ -4,7 +4,7 @@
  * WHY THIS EXISTS
  *
  * `gateway/auth.py:67` requires the namespaced claim
- * `https://agentshield.com/tenant_id` and answers 403
+ * `https://api.agentshield.local/tenant_id` and answers 403
  * "Token missing mandatory tenant identification claim" without it. A plain
  * Auth0 login issues no such claim, so an authenticated portal session cannot
  * make a single successful API call. The symptom is not an auth failure: it is
@@ -35,7 +35,7 @@
  * or the dashboard, never through a token or a user-supplied field.
  */
 
-const TENANT_CLAIM = 'https://agentshield.com/tenant_id';
+const TENANT_CLAIM = 'https://api.agentshield.local/tenant_id';
 const PERMISSIONS_CLAIM = 'permissions';
 
 exports.onExecutePostLogin = async (event, api) => {

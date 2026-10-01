@@ -10,11 +10,11 @@ do not edit it only in the dashboard.
 
 | File | Trigger | What it does |
 | --- | --- | --- |
-| `actions/add-tenant-claims.js` | Post-Login | Stamps `https://agentshield.com/tenant_id` and `permissions` onto the ID and access tokens |
+| `actions/add-tenant-claims.js` | Post-Login | Stamps `https://api.agentshield.local/tenant_id` and `permissions` onto the ID and access tokens |
 
 ### Why it is required
 
-`gateway/auth.py:67` reads `https://agentshield.com/tenant_id` from the **access
+`gateway/auth.py:67` reads `https://api.agentshield.local/tenant_id` from the **access
 token** and returns 403 `Token missing mandatory tenant identification claim`
 when it is absent. A stock Auth0 login issues no such claim, so an authenticated
 portal session makes zero successful API calls.
@@ -56,7 +56,7 @@ Then sign in and confirm the claims are present on the access token:
 
 ```bash
 # paste the access_token from the SPA's localStorage entry
-echo "$ACCESS_TOKEN" | cut -d. -f2 | base64 -d | jq '.["https://agentshield.com/tenant_id"], .permissions'
+echo "$ACCESS_TOKEN" | cut -d. -f2 | base64 -d | jq '.["https://api.agentshield.local/tenant_id"], .permissions'
 ```
 
 Expected:

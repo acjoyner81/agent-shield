@@ -22,7 +22,7 @@ Without this, the system is vulnerable to cross tenant impersonation, where a us
 **Acceptance criteria**:
 - **AC-1**: Unauthenticated or invalid requests to `/v1/*` return HTTP 401 Unauthorized.
 - **AC-2**: Valid Auth0 Bearer tokens are verified against the Auth0 JWKS endpoint (`/.well-known/jwks.json`).
-- **AC-3**: Key Auth0 claims (`sub`, `https://agentshield.com/tenant_id`, `permissions`) are extracted and injected into the FastAPI request state.
+- **AC-3**: Key Auth0 claims (`sub`, `https://api.agentshield.local/tenant_id`, `permissions`) are extracted and injected into the FastAPI request state.
 - **AC-4**: The verified `tenant_id` from the token replaces any untrusted incoming `X-Tenant-ID` headers to prevent cross tenant impersonation.
 - **AC-5**: Telemetry entries for authenticated requests automatically inherit the verified `tenant_id` and `user_id`.
 
@@ -78,7 +78,7 @@ The authentication layer acts as a dependency for all `/v1/*` endpoints.
 | Action | Value produced / displayed | Source |
 |---|---|---|
 | Token Verification | `user_id` | `sub` claim from JWT |
-| Tenant Resolution | `tenant_id` | `https://agentshield.com/tenant_id` claim from JWT |
+| Tenant Resolution | `tenant_id` | `https://api.agentshield.local/tenant_id` claim from JWT |
 | Context Binding | `X-Tenant-ID` | Verified `tenant_id` from JWT (overrides header) |
 
 **Key invariants**:
