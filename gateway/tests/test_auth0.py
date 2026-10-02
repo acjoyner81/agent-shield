@@ -28,7 +28,7 @@ from unittest.mock import patch
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
 from config.settings import settings
@@ -47,6 +47,12 @@ def settings_jwks_url() -> str:
 
 TENANT_CLAIM = "https://api.agentshield.local/tenant_id"
 LEGACY_TENANT_CLAIM = "https://agentshield.com/tenant_id"
+# The claim is namespaced. The bare name is reserved by Auth0's RBAC and is
+# dropped from the access token without failing the login, so a token built with
+# it would describe something Auth0 cannot issue. Aliasing the keyword here keeps
+# the readable `permissions=` call sites pointed at the real claim instead of
+# quietly adding a second, ignored one.
+PERMISSIONS_CLAIM = "https://api.agentshield.local/permissions"
 
 AUDIENCE = "https://api.agentshield.local"
 ISSUER = "https://dev-zymaiayb0afkpn7n.us.auth0.com/"
@@ -130,17 +136,18 @@ def make_token(signing_key, **overrides) -> str:
     claims = {
         "sub": "auth0|user_alpha_1",
         TENANT_CLAIM: "tenant_alpha",
-        "permissions": ["tools:execute", "keys:write"],
+        PERMISSIONS_CLAIM: ["tools:execute", "keys:write"],
         "aud": AUDIENCE,
         "iss": ISSUER,
         "iat": now,
         "exp": now + timedelta(hours=1),
     }
     for key, value in overrides.items():
+        claim_name = PERMISSIONS_CLAIM if key == "permissions" else key
         if value is _REMOVED:
-            claims.pop(key, None)
+            claims.pop(claim_name, None)
         else:
-            claims[key] = value
+            claims[claim_name] = value
     return jwt.encode(claims, signing_key, algorithm="RS256")
 
 
@@ -416,17 +423,78 @@ class TestPermissionClaimHandling:
         assert body["permissions"] == ["keys:write", "tools:execute"]
 
     def test_an_absent_permissions_claim_yields_no_scopes(self, signing_key, jwks):
-        """Missing is not the same as empty-granted: the caller holds nothing.
+        """An absent claim is reported as absent, not as a missing scope.
 
-        RBAC then fails closed with a 403 naming the missing scope, which is the
-        intended outcome for an incompletely seeded user.
+        Both cases end in a 403, so the status code alone cannot tell them apart,
+        and the difference matters: an absent claim means the Auth0 Post-Login
+        Action never stamped the token, which no amount of permission granting
+        fixes, while a genuinely empty claim means this user simply holds
+        nothing. Reporting the absent case as "missing required scope" blames the
+        caller and points away from the login configuration, which is exactly how
+        the namespacing bug in that Action read as a permissions problem for as
+        long as it went unnoticed.
         """
         token = make_token(signing_key, permissions=REMOVE)
 
         response = probe_client.get("/scoped", headers=auth(token))
 
         assert response.status_code == 403
-        assert "keys:write" in response.json()["detail"]
+        detail = response.json()["detail"]
+        assert PERMISSIONS_CLAIM in detail
+        assert "Post-Login Action" in detail
+        assert "missing required scope" not in detail
+
+    def test_a_present_but_empty_claim_names_the_missing_scope(self, signing_key, jwks):
+        """The complement: an empty claim is a real answer about the user.
+
+        The Action sets an empty list deliberately when app_metadata has no
+        permissions, so that a user authenticates and gets a per-permission 403
+        instead of being locked out. That path must keep naming the scope.
+        """
+        token = make_token(signing_key, permissions=[])
+
+        response = probe_client.get("/scoped", headers=auth(token))
+
+        assert response.status_code == 403
+        detail = response.json()["detail"]
+        assert "missing required scope" in detail
+        assert "keys:write" in detail
+
+    def test_a_bare_permissions_claim_grants_nothing(self, signing_key, jwks):
+        """The regression guard for the namespacing bug, and it must stay.
+
+        A token carrying the unnamespaced `permissions` claim is a token Auth0
+        cannot actually issue: the name is reserved by its RBAC, and on a
+        collision the login still succeeds while the claim is not added. The
+        Action set exactly that name for a long time, which left the gateway
+        reading nothing and every gated route 403ing for real users while the
+        seed script printed an advisory about it.
+
+        This test pins the failure direction. If someone "fixes" the gateway by
+        reading the bare name as well, the claim would start granting access
+        again for tokens that should not exist, and RBAC would be driven by a
+        name Auth0 controls rather than one this application stamps.
+        """
+        token = jwt.encode(
+            {
+                "sub": "auth0|user_alpha_1",
+                TENANT_CLAIM: "tenant_alpha",
+                "permissions": ["keys:write", "tools:execute"],
+                "aud": AUDIENCE,
+                "iss": ISSUER,
+                "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            },
+            signing_key,
+            algorithm="RS256",
+        )
+
+        body = probe_client.get("/bound", headers=auth(token)).json()
+
+        assert body["permissions"] == [], "the unnamespaced claim must not grant anything"
+
+        response = probe_client.get("/scoped", headers=auth(token))
+        assert response.status_code == 403
+        assert PERMISSIONS_CLAIM in response.json()["detail"]
 
     def test_a_string_permissions_claim_yields_no_scopes(self, signing_key, jwks):
         """A string must not become {'k','e','y',':'...} and then match a scope.
@@ -540,7 +608,75 @@ class TestJwksClientIsCached:
             _jwks_client.cache_clear()
 
 
+class TestKeyWriteGateCarriesTheSameDiagnostic:
+    """The key write routes must report a missing claim, not just the proxy route.
+
+    `POST /v1/keys` and its rotate and revoke siblings are guarded by
+    `gateway.dependencies.require_permission`, which used to be a separate
+    implementation from the one on `/v1/tools/execute`. It had its own 403
+    message and emitted no authz telemetry, so the diagnostic that names a
+    misconfigured Post-Login Action stopped at the edge of the proxy and never
+    reached the credential minting routes. Those are the calls that can widen a
+    principal's reach, which is exactly where a wrong explanation costs the most
+    time to chase down.
+    """
+
+    @pytest.mark.asyncio
+    async def test_it_names_the_missing_claim(self):
+        from starlette.requests import Request as StarletteRequest
+
+        from gateway.dependencies import require_permission as key_write_gate
+
+        request = StarletteRequest({"type": "http", "method": "POST", "path": "/v1/keys", "headers": []})
+        request.state.permissions = set()
+        request.state.permissions_claim_present = False
+        request.state.user_id = "auth0|user_1"
+
+        checker = key_write_gate("keys:write")
+        with pytest.raises(HTTPException) as caught:
+            await checker(request, "tenant_alpha")
+
+        assert caught.value.status_code == 403
+        assert PERMISSIONS_CLAIM in caught.value.detail
+        assert "keys:write" not in caught.value.detail, (
+            "naming a specific scope implies the claim was read and refused, "
+            "which is not what happened"
+        )
+
+    @pytest.mark.asyncio
+    async def test_it_still_names_the_scope_for_a_scoped_but_unqualified_caller(self):
+        from starlette.requests import Request as StarletteRequest
+
+        from gateway.dependencies import require_permission as key_write_gate
+
+        request = StarletteRequest({"type": "http", "method": "POST", "path": "/v1/keys", "headers": []})
+        request.state.permissions = {"logs:read"}
+        request.state.permissions_claim_present = True
+        request.state.user_id = "auth0|user_1"
+
+        checker = key_write_gate("keys:write")
+        with pytest.raises(HTTPException) as caught:
+            await checker(request, "tenant_alpha")
+
+        assert caught.value.status_code == 403
+        assert "keys:write" in caught.value.detail
+
+    @pytest.mark.asyncio
+    async def test_it_returns_the_permission_when_granted(self):
+        from starlette.requests import Request as StarletteRequest
+
+        from gateway.dependencies import require_permission as key_write_gate
+
+        request = StarletteRequest({"type": "http", "method": "POST", "path": "/v1/keys", "headers": []})
+        request.state.permissions = {"keys:write"}
+        request.state.permissions_claim_present = True
+        request.state.user_id = "auth0|user_1"
+
+        assert await key_write_gate("keys:write")(request, "tenant_alpha") == "keys:write"
+
+
 class TestBindTenantStateDirectly:
+
     """Unit coverage for the binding helper, including states the routes avoid.
 
     `_bind_tenant_state` is what every authenticated request funnels through, and
@@ -557,7 +693,7 @@ class TestBindTenantStateDirectly:
 
         tenant_id = _bind_tenant_state(
             request,
-            {"sub": "auth0|user_1", TENANT_CLAIM: "tenant_gamma", "permissions": ["logs:read"]},
+            {"sub": "auth0|user_1", TENANT_CLAIM: "tenant_gamma", PERMISSIONS_CLAIM: ["logs:read"]},
         )
 
         assert tenant_id == "tenant_gamma"
@@ -565,6 +701,7 @@ class TestBindTenantStateDirectly:
         assert request.state.user_id == "auth0|user_1"
         assert request.state.principal_verified is True
         assert request.state.permissions == {"logs:read"}
+        assert request.state.permissions_claim_present is True
 
     def test_a_non_string_tenant_claim_is_coerced_not_dropped(self):
         """An int tenant becomes its string form rather than vanishing.

@@ -71,21 +71,29 @@ async def bind_check(
 bind_client = TestClient(bind_app)
 
 
+TENANT_CLAIM = "https://api.agentshield.local/tenant_id"
+PERMISSIONS_CLAIM = "https://api.agentshield.local/permissions"
+
+
 def make_claims(permissions, sub="user_rbac", tenant="tenant_rbac") -> dict:
     return {
         "sub": sub,
-        "https://api.agentshield.local/tenant_id": tenant,
-        "permissions": permissions,
+        TENANT_CLAIM: tenant,
+        PERMISSIONS_CLAIM: permissions,
     }
 
 
 def make_resolver(claims):
     """Returns a resolve_active_tenant override that binds the given claims."""
     async def _resolve(request: Request) -> str:
-        request.state.tenant_id = claims["https://api.agentshield.local/tenant_id"]
+        request.state.tenant_id = claims[TENANT_CLAIM]
         request.state.user_id = claims["sub"]
-        request.state.permissions = set(claims.get("permissions", []))
-        return claims["https://api.agentshield.local/tenant_id"]
+        request.state.permissions = set(claims.get(PERMISSIONS_CLAIM, []))
+        # The gate distinguishes a token with no permission claims from one whose
+        # claim is merely empty, so a stub resolver that omits this would report
+        # every denial as a missing Action instead of a genuinely held scope.
+        request.state.permissions_claim_present = True
+        return claims[TENANT_CLAIM]
     return _resolve
 
 

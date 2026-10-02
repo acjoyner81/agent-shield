@@ -45,7 +45,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-TENANT_CLAIM = "https://api.agentshield.local/tenant_id"
+CLAIM_NAMESPACE = "https://api.agentshield.local"
+TENANT_CLAIM = f"{CLAIM_NAMESPACE}/tenant_id"
+# Must be namespaced. The bare `permissions` name is reserved by Auth0's RBAC:
+# on a collision the login transaction still succeeds and the claim is simply
+# not added, so the gateway reads nothing and every gated route 403s while this
+# script previously called that harmless. Keep it in step with
+# auth0/actions/add-tenant-claims.js and gateway/auth.py.
+PERMISSIONS_CLAIM = f"{CLAIM_NAMESPACE}/permissions"
 
 # The enforced permission set. `logs:read` is deliberately absent: nothing in
 # the gateway checks it, so granting it implies a protection that does not exist.
@@ -162,7 +169,7 @@ def stage_decode(access_token, tenant_id, permissions, audience, issuer):
     """The claims must be on the ACCESS token, which is what the gateway reads."""
     claims = decode_claims(access_token)
     got_tenant = claims.get(TENANT_CLAIM)
-    got_permissions = claims.get("permissions")
+    got_permissions = claims.get(PERMISSIONS_CLAIM)
 
     if got_tenant is None:
         raise StageError(
@@ -171,15 +178,28 @@ def stage_decode(access_token, tenant_id, permissions, audience, issuer):
         )
     if got_tenant != tenant_id:
         raise StageError(f"tenant claim is {got_tenant!r}, expected {tenant_id!r}")
+
+    # A missing permissions claim is fatal here, and it used to be a WARN that
+    # said the gateway "is permitted by API-key scopes instead". That was wrong:
+    # the JWT path never falls back to key scopes, so a token without this claim
+    # cannot pass `require_permission` at all. Flagging it advisory is what let a
+    # namespacing bug in the Post-Login Action sit there looking like noise while
+    # RBAC was unenforced for every interactive user. API keys were unaffected
+    # because their permissions come from the key store, which is why the failure
+    # looked inconsistent rather than total.
+    if PERMISSIONS_CLAIM not in claims:
+        raise StageError(
+            f"no {PERMISSIONS_CLAIM} claim on the access token. The Post-Login Action "
+            "did not stamp it. Note that a claim named plainly 'permissions' is "
+            "reserved by Auth0's RBAC and is dropped without failing the login, so "
+            "the claim has to be namespaced. Redeploy "
+            "auth0/actions/add-tenant-claims.js and sign in again."
+        )
     if sorted(got_permissions or []) != sorted(permissions):
-        # Advisory, not fatal. Auth0 RBAC owns the reserved `permissions` claim
-        # when "Add Permissions in the Access Token" is enabled, and overwrites
-        # whatever the Post-Login Action sets with the RBAC-assigned set. A token
-        # can therefore be missing this claim and still be accepted by the
-        # gateway, which is permitted by API-key scopes instead. Flag it, do not
-        # block on it.
-        print(f"  WARN  permissions claim is {got_permissions!r}, expected {permissions!r}")
-        print("        The tenant claim is what the gateway requires, so continuing.")
+        raise StageError(
+            f"{PERMISSIONS_CLAIM} is {got_permissions!r}, expected {permissions!r}. "
+            "Re-run the seed stage, or pass the right --permissions."
+        )
 
     # Auth0 returns `aud` as a list for this token because the API audience and
     # the /userinfo audience are both granted. The gateway pins a single

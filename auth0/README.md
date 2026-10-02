@@ -10,7 +10,7 @@ do not edit it only in the dashboard.
 
 | File | Trigger | What it does |
 | --- | --- | --- |
-| `actions/add-tenant-claims.js` | Post-Login | Stamps `https://api.agentshield.local/tenant_id` and `permissions` onto the ID and access tokens |
+| `actions/add-tenant-claims.js` | Post-Login | Stamps `https://api.agentshield.local/tenant_id` and `https://api.agentshield.local/permissions` onto the ID and access tokens |
 
 ### Why it is required
 
@@ -56,7 +56,7 @@ Then sign in and confirm the claims are present on the access token:
 
 ```bash
 # paste the access_token from the SPA's localStorage entry
-echo "$ACCESS_TOKEN" | cut -d. -f2 | base64 -d | jq '.["https://api.agentshield.local/tenant_id"], .permissions'
+echo "$ACCESS_TOKEN" | cut -d. -f2 | base64 -d | jq '.["https://api.agentshield.local/tenant_id"], .["https://api.agentshield.local/permissions"]'
 ```
 
 Expected:

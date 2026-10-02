@@ -9,19 +9,29 @@ from fastapi import Depends, HTTPException, Request, status
 from redis import asyncio as aioredis
 
 from gateway.auth import resolve_active_tenant
+from gateway.auth import _assert_permission
+
 
 def require_permission(permission: str):
+    """Enforce a permission scope, delegating to the single gate in gateway.auth.
+
+    This used to be a second, independent implementation of the same check with
+    its own 403 message, no authz telemetry, and no way to tell an absent claim
+    from a genuinely held one. That mattered because this is the implementation
+    guarding the key write routes in keys.py, so the diagnostic that identifies
+    a misconfigured Auth0 Action never reached the most security sensitive calls
+    in the API, and two gates that can drift apart is precisely how a permission
+    check ends up enforced in one place and skipped in another.
+
+    Keeping one implementation means one message, one telemetry path, and one
+    place to change. It still returns the permission string rather than a
+    boolean, because that is what the existing call sites annotate themselves as.
     """
-    Dependency factory that enforces a specific permission scope.
-    Returns the permission string if granted, otherwise raises 403 Forbidden.
-    """
-    async def dependency(request: Request):
-        permissions = getattr(request.state, "permissions", None) or set()
-        if permission not in permissions:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Missing required permission: {permission}",
-            )
+    async def dependency(
+        request: Request,
+        tenant_id: Annotated[str, Depends(resolve_active_tenant)],
+    ):
+        _assert_permission(request, permission, tenant_id)
         return permission
     return dependency
 

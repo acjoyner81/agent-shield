@@ -15,6 +15,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from config.settings import settings
 from gateway.telemetry import emit_authz_failure, emit_key_rotation
 
+# Claim names on the AgentShield access token. Both are namespaced and the
+# gateway reads these exact strings, so the Post-Login Action and this module
+# have to change together. See auth0/actions/add-tenant-claims.js for why the
+# namespace on `permissions` is load-bearing rather than stylistic.
+TENANT_CLAIM = "https://api.agentshield.local/tenant_id"
+PERMISSIONS_CLAIM = "https://api.agentshield.local/permissions"
+
 bearer_scheme = HTTPBearer(auto_error=False)
 
 _r = redis.Redis.from_url(settings.redis_url, decode_responses=True)
@@ -41,17 +48,21 @@ def verify_token_credentials(token: str) -> dict[str, object]:
     """Validate an Auth0 access token string and return its claims."""
     dev_mode = environ.get("DEV_MODE")
     if dev_mode == "true":
+        # These stand-ins must mirror the claim names Auth0 actually issues, or
+        # they would test a token shape that cannot exist and hide a real
+        # mismatch. In particular `permissions` is namespaced, because the bare
+        # name is reserved by Auth0's RBAC and never arrives on a real token.
         if token == "dev-mock-token":
             return {
                 "sub": "user_dev_123",
-                "https://api.agentshield.local/tenant_id": "tenant_alpha",
-                "permissions": ["tools:execute", "logs:read", "keys:write"],
+                TENANT_CLAIM: "tenant_alpha",
+                PERMISSIONS_CLAIM: ["tools:execute", "logs:read", "keys:write"],
             }
         if token == "dev-unprivileged-token":
             return {
                 "sub": "user_dev_456",
-                "https://api.agentshield.local/tenant_id": "tenant_alpha",
-                "permissions": ["logs:read"],
+                TENANT_CLAIM: "tenant_alpha",
+                PERMISSIONS_CLAIM: ["logs:read"],
             }
 
     try:
@@ -87,15 +98,35 @@ def verify_jwt(
 
 def _bind_tenant_state(request: Request, claims: dict[str, object]) -> str:
     """Bind a verified principal's tenant, user, and permissions to request state."""
-    tenant_id = str(claims.get("https://api.agentshield.local/tenant_id"))
+    tenant_id = str(claims.get(TENANT_CLAIM))
     user_id = str(claims.get("sub"))
 
     request.state.tenant_id = tenant_id
     request.state.user_id = user_id
     request.state.principal_verified = True
 
-    permissions = claims.get("permissions", [])
-    request.state.permissions = set(permissions) if isinstance(permissions, list) else set()
+    # The claim is namespaced and must be read under that exact name. Auth0
+    # reserves the bare `permissions` name for its own RBAC, and its documented
+    # behaviour on a collision is that the transaction succeeds while the custom
+    # claim is quietly not added. The Action used to set the bare name, so every
+    # real user token arrived with no permissions claim at all and every gated
+    # route 403'd. An unnamespaced read here would look like it was working.
+    #
+    # Absence is recorded separately from emptiness. A claim that is missing
+    # means the Action never stamped this token, which is an Auth0 configuration
+    # fault, while an empty claim means the user genuinely holds nothing. Those
+    # need very different fixes, and collapsing both to an empty set is what let
+    # this hide: the 403 said "missing required scope", which points at the user
+    # and away from the login configuration that actually broke.
+    raw_permissions = claims.get(PERMISSIONS_CLAIM)
+    if isinstance(raw_permissions, list):
+        request.state.permissions = {
+            str(permission) for permission in raw_permissions if isinstance(permission, str)
+        }
+        request.state.permissions_claim_present = True
+    else:
+        request.state.permissions = set()
+        request.state.permissions_claim_present = False
 
     return tenant_id
 
@@ -228,6 +259,56 @@ async def resolve_active_tenant(request: Request) -> str:
     raise _authorization_error("Not authenticated")
 
 
+def _assert_permission(request: Request, required_scope: str, tenant_id: str) -> None:
+    """The one implementation of the permission check. Raises 403 if not granted.
+
+    Both permission dependencies call this rather than each rolling its own
+    comparison. They used to be independent: one in this module and one in
+    gateway/dependencies.py, with different 403 messages and only one of them
+    emitting authz telemetry. Two gates that can drift is how a check ends up
+    enforced on one route and skipped on another, and the copy guarding the key
+    write routes was the one without telemetry.
+    """
+    permissions = getattr(request.state, "permissions", set())
+    if required_scope in permissions:
+        return
+
+    traceparent = request.headers.get("traceparent")
+    if traceparent and "-" in traceparent:
+        trace_id = traceparent.split("-")[1]
+    else:
+        trace_id = "unknown"
+
+    user_id = getattr(request.state, "user_id", "unknown")
+    span_id = trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown"
+
+    # Synchronous direct call (removed asyncio.create_task and removed duplicate call)
+    emit_authz_failure(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        trace_id=trace_id,
+        span_id=span_id,
+        missing_scope=required_scope,
+    )
+
+    # Name the actual cause. "Missing required scope" blames the caller, but when
+    # the claim is absent entirely the caller may hold every permission in the
+    # system and the real fault is that Auth0 never issued the claim. That is
+    # exactly how a namespacing bug in the Post-Login Action presented as a
+    # permissions problem for as long as it went unnoticed.
+    if not getattr(request.state, "permissions_claim_present", True):
+        detail = (
+            f"Permission denied: this token carries no '{PERMISSIONS_CLAIM}' claim, "
+            "so no permissions can be evaluated. The Auth0 Post-Login Action did "
+            "not stamp this token. Redeploy auth0/actions/add-tenant-claims.js and "
+            "sign in again."
+        )
+    else:
+        detail = f"Permission denied: missing required scope '{required_scope}'"
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
 def require_permission(required_scope: str):
     """
     Dependency factory that returns a function to verify a specific permission.
@@ -236,29 +317,6 @@ def require_permission(required_scope: str):
         request: Request,
         tenant_id: Annotated[str, Depends(resolve_active_tenant)],
     ):
-        permissions = getattr(request.state, "permissions", set())
-        if required_scope not in permissions:
-            traceparent = request.headers.get("traceparent")
-            if traceparent and "-" in traceparent:
-                trace_id = traceparent.split("-")[1]
-            else:
-                trace_id = "unknown"
-
-            user_id = getattr(request.state, "user_id", "unknown")
-            span_id = trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown"
-
-            # Synchronous direct call (removed asyncio.create_task and removed duplicate call)
-            emit_authz_failure(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                trace_id=trace_id,
-                span_id=span_id,
-                missing_scope=required_scope,
-            )
-
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: missing required scope '{required_scope}'",
-            )
+        _assert_permission(request, required_scope, tenant_id)
         return True
     return permission_checker
