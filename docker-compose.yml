@@ -132,6 +132,9 @@ services:
       - ./java-services:/mnt/java-services:ro
       - ./portal-frontend/nginx.conf:/mnt/nginx.conf:ro
       - ./config:/mnt/config:ro
+      # The monitor watches its own policy, config, and entrypoint. Otherwise a
+      # tampered twpol.txt silently stops the monitoring and reports clean.
+      - ./tripwire:/mnt/tripwire:ro
       - tripwire-data:/var/lib/tripwire
       - tripwire-keys:/etc/tripwire
     environment:

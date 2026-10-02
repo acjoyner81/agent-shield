@@ -11,9 +11,10 @@
 TWROOT=/etc/tripwire ;
 TWBIN=/usr/sbin ;
 
-SEC_CRIT   = -p+imnsugcms ;
-SEC_CONFIG = -p+imnsugcms ;
-SEC_APP    = -p+imnsugcms ;
+SEC_CRIT   = -p+imnsugcmsC ;
+SEC_CONFIG = -p+imnsugcmsC ;
+SEC_APP    = -p+imnsugcmsC ;
+SEC_SELF   = -p+imnsugcmsC ;
 
 @@section FS
 
@@ -22,6 +23,19 @@ SEC_APP    = -p+imnsugcms ;
 /mnt/java-services  -> $(SEC_APP) (recurse=true) ;
 /mnt/nginx.conf     -> $(SEC_CONFIG) ;
 /mnt/config         -> $(SEC_CONFIG) (recurse=true) ;
+
+# The monitor's own policy, config, and entrypoint.
+#
+# Without this a tampered twpol.txt is the perfect blind spot: edit the file to
+# drop a path from scope and the monitor reports clean forever while protecting
+# nothing. A file integrity monitor that does not watch its own configuration is
+# trivially switched off by whoever it is meant to catch.
+#
+# Changes here are legitimate too, so this reports them like any other object.
+# The keys are deliberately not in this tree. They live in /etc/tripwire, which
+# is the separate tripwire-keys volume, so that watching them would mean handing
+# the container its own encryption material to read.
+/mnt/tripwire       -> $(SEC_SELF) (recurse=true) ;
 
 # Stop points. A stop point names one literal path, it does not take a pattern,
 # so every generated directory has to be listed by name. A regex here compiles

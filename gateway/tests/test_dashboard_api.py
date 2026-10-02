@@ -561,6 +561,42 @@ class TestFileIntegrityProbe:
             await self._probe(verdict_path)
 
     @pytest.mark.asyncio
+    async def test_a_policy_mismatch_reports_the_reason_not_an_empty_count(self, verdict_path):
+        """A policy mismatch scanned nothing, so both counts are legitimately zero.
+
+        Reporting that as "0 of 0 monitored objects differ" would read like a
+        healthy monitor that found nothing to complain about. The truth is the
+        opposite: nothing was verified at all, so the monitor's own reason has to
+        reach the operator instead of a count that says nothing.
+        """
+        self._write(
+            verdict_path,
+            verdict="error",
+            violations=0,
+            objects=0,
+            reason="Policy no longer matches the baseline, so nothing was verified.",
+            checked_at=self._fresh_timestamp(),
+        )
+
+        with pytest.raises(RuntimeError, match="nothing was verified"):
+            await self._probe(verdict_path)
+
+    @pytest.mark.asyncio
+    async def test_a_blank_reason_falls_back_to_the_count(self, verdict_path):
+        """An absent or empty reason must not turn the probe into a silent pass."""
+        self._write(
+            verdict_path,
+            verdict="error",
+            violations=2,
+            objects=50,
+            reason="   ",
+            checked_at=self._fresh_timestamp(),
+        )
+
+        with pytest.raises(RuntimeError, match="2 of 50 monitored objects"):
+            await self._probe(verdict_path)
+
+    @pytest.mark.asyncio
     async def test_a_clean_verdict_that_still_reports_violations_is_degraded(self, verdict_path):
         """The count is trusted over the verdict string.
 

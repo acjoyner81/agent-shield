@@ -262,6 +262,14 @@ async def _probe_file_integrity() -> None:
     violations = verdict.get("violations", 0)
     objects = verdict.get("objects", 0)
     if verdict.get("verdict") != "clean" or violations:
+        # The monitor supplies a reason for the states a count cannot describe.
+        # When the policy no longer matches the baseline the check scans nothing
+        # at all, so violations and objects are both zero and "0 of 0 monitored
+        # objects differ" would read as a healthy monitor that found nothing,
+        # which is the opposite of what happened: nothing was verified.
+        reason = str(verdict.get("reason") or "").strip()
+        if reason:
+            raise RuntimeError(reason)
         raise RuntimeError(
             f"{violations} of {objects} monitored objects differ from the approved baseline"
         )
