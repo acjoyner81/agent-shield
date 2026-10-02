@@ -46,6 +46,13 @@ export interface ServiceHealth {
   name: string;
   status: 'healthy' | 'degraded';
   latency_ms: number;
+  /**
+   * Why the probe failed, when it did. Absent or null while healthy.
+   *
+   * A service list that reports only "degraded" cannot be acted on, so the
+   * gateway returns the reason it already knows rather than only logging it.
+   */
+  detail?: string | null;
 }
 
 export interface ServiceHealthResponse {

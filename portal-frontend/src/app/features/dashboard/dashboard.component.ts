@@ -106,6 +106,9 @@ import { TelemetryService } from '../../core/services/telemetry.service';
               </span>
               <strong>{{ service.status }}</strong>
               <small>{{ service.latency_ms | number:'1.0-0' }}ms</small>
+              @if (service.status !== 'healthy' && service.detail) {
+                <p class="health-detail">{{ service.detail }}</p>
+              }
             </div>
           } @empty {
             <div>

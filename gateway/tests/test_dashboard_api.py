@@ -8,8 +8,10 @@ Covers the acceptance criteria for the two dashboard reads:
 - AC-6: every value stays scoped to the authenticated tenant.
 """
 
+import json
 import os
 import fnmatch
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,7 +19,12 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from gateway.auth import resolve_active_tenant
-from gateway.main import app
+from gateway.main import (
+    INTEGRITY_STALE_SECONDS,
+    _probe_file_integrity,
+    _verdict_age_seconds,
+    app,
+)
 from gateway.metering import (
     META_MODEL,
     get_tenant_usage_summary,
@@ -442,7 +449,9 @@ class TestHealthServices:
     def healthy_probes(self):
         with patch("gateway.main._probe_redis", new=AsyncMock()), patch(
             "gateway.main._probe_mcp", new=AsyncMock()
-        ), patch("gateway.main._probe_stripe", new=AsyncMock()):
+        ), patch("gateway.main._probe_stripe", new=AsyncMock()), patch(
+            "gateway.main._probe_file_integrity", new=AsyncMock()
+        ):
             yield
 
     def test_lists_gateway_mcp_and_redis_with_status_and_latency(self):
@@ -503,3 +512,141 @@ class TestHealthServices:
     def test_served_under_the_portal_api_alias(self):
         """The portal calls /api/v1/health/services through the Angular dev proxy."""
         assert client.get("/api/v1/health/services", headers=DEV_HEADERS).status_code == 200
+
+
+class TestFileIntegrityProbe:
+    """The integrity monitor reports on the service health surface.
+
+    Tripwire's telemetry alert landed under tenant_id "system", which no real
+    tenant reads, so integrity alerts were invisible to every human. The verdict
+    file is how platform state reaches the health surface without adding another
+    unauthenticated write endpoint that anyone could spoof.
+    """
+
+    @pytest.fixture
+    def verdict_path(self, tmp_path):
+        return tmp_path / "verdict.json"
+
+    def _write(self, path, **fields):
+        payload = {"verdict": "clean", "objects": 112, "violations": 0, "host": "agentshield-fim"}
+        payload.update(fields)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def _fresh_timestamp(self, seconds_ago=0):
+        moment = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+        return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    async def _probe(self, path):
+        with patch("gateway.main.INTEGRITY_VERDICT_PATH", str(path)):
+            return await _probe_file_integrity()
+
+    @pytest.mark.asyncio
+    async def test_a_fresh_clean_verdict_is_healthy(self, verdict_path):
+        self._write(verdict_path, checked_at=self._fresh_timestamp())
+
+        assert await self._probe(verdict_path) is None
+
+    @pytest.mark.asyncio
+    async def test_violations_are_degraded_and_name_the_count(self, verdict_path):
+        self._write(
+            verdict_path,
+            verdict="violations",
+            violations=7,
+            objects=112,
+            checked_at=self._fresh_timestamp(),
+        )
+
+        with pytest.raises(RuntimeError, match="7 of 112 monitored objects"):
+            await self._probe(verdict_path)
+
+    @pytest.mark.asyncio
+    async def test_a_clean_verdict_that_still_reports_violations_is_degraded(self, verdict_path):
+        """The count is trusted over the verdict string.
+
+        The monitor writes both, so they should agree. If they ever disagree the
+        nonzero count is the one that describes tampering, so it wins.
+        """
+        self._write(verdict_path, verdict="clean", violations=3, checked_at=self._fresh_timestamp())
+
+        with pytest.raises(RuntimeError, match="3 of"):
+            await self._probe(verdict_path)
+
+    @pytest.mark.asyncio
+    async def test_a_stale_verdict_is_degraded(self, verdict_path):
+        """A monitor that stopped reporting must not read as a healthy one."""
+        self._write(verdict_path, checked_at=self._fresh_timestamp(seconds_ago=INTEGRITY_STALE_SECONDS + 60))
+
+        with pytest.raises(RuntimeError, match="old"):
+            await self._probe(verdict_path)
+
+    @pytest.mark.asyncio
+    async def test_a_missing_verdict_is_degraded(self, verdict_path):
+        with pytest.raises(RuntimeError, match="no Tripwire verdict"):
+            await self._probe(verdict_path)
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_verdict_is_degraded(self, verdict_path):
+        verdict_path.write_text("{not json", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match="unreadable"):
+            await self._probe(verdict_path)
+
+    @pytest.mark.asyncio
+    async def test_a_verdict_without_a_usable_timestamp_is_degraded(self, verdict_path):
+        """A timestamp that cannot be parsed means the age is unknown.
+
+        Treating an unknown age as fresh would let a stale monitor pass, which is
+        the exact failure this probe exists to catch.
+        """
+        self._write(verdict_path, checked_at="not-a-timestamp")
+
+        with pytest.raises(RuntimeError, match="no usable timestamp"):
+            await self._probe(verdict_path)
+
+    def test_verdict_age_is_measured_against_utc(self):
+        assert _verdict_age_seconds(self._fresh_timestamp()) == pytest.approx(0, abs=5)
+
+    def test_verdict_age_rejects_an_unparseable_timestamp(self):
+        assert _verdict_age_seconds("") is None
+        assert _verdict_age_seconds("2026-13-45T99:99:99Z") is None
+
+    def test_it_appears_in_the_service_list(self):
+        """The probe has to be wired into the route, not merely defined."""
+        with patch("gateway.main._probe_redis", new=AsyncMock()), patch(
+            "gateway.main._probe_mcp", new=AsyncMock()
+        ), patch("gateway.main._probe_file_integrity", new=AsyncMock()):
+            names = {
+                s["name"]
+                for s in client.get("/v1/health/services", headers=DEV_HEADERS).json()["services"]
+            }
+
+        assert "file-integrity" in names
+
+    def test_a_degraded_monitor_flips_overall_and_explains_itself(self):
+        """A red tile with no reason is not actionable, so the reason travels."""
+        with patch("gateway.main._probe_redis", new=AsyncMock()), patch(
+            "gateway.main._probe_mcp", new=AsyncMock()
+        ), patch(
+            "gateway.main._probe_file_integrity",
+            new=AsyncMock(side_effect=RuntimeError("3 of 112 monitored objects differ")),
+        ):
+            body = client.get("/v1/health/services", headers=DEV_HEADERS).json()
+
+        services = {s["name"]: s for s in body["services"]}
+        assert services["file-integrity"]["status"] == "degraded"
+        assert "3 of 112" in services["file-integrity"]["detail"]
+        assert body["overall"] == "degraded"
+
+    def test_health_still_exposes_no_tenant_data(self):
+        """Adding an infrastructure signal must not widen what this route reveals."""
+        with patch("gateway.main._probe_redis", new=AsyncMock()), patch(
+            "gateway.main._probe_mcp", new=AsyncMock()
+        ), patch(
+            "gateway.main._probe_file_integrity",
+            new=AsyncMock(side_effect=RuntimeError("1 of 112 monitored objects differ")),
+        ):
+            body = client.get("/v1/health/services", headers=DEV_HEADERS).text
+
+        for leak in ["tenant_alpha", "tenant_id", "usage", "tokens"]:
+            assert leak not in body

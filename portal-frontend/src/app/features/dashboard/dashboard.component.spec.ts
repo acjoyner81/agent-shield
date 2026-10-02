@@ -208,6 +208,58 @@ describe('Dashboard refresh contract (Spec 0011 AC-5, AC-6)', () => {
     expect(el.querySelector('.health-list')?.textContent).toContain('18ms');
   });
 
+  it('shows why a degraded service failed', () => {
+    const withReason: ServiceHealthResponse = {
+      overall: 'degraded',
+      services: [
+        { name: 'gateway', status: 'healthy', latency_ms: 0.4, detail: null },
+        {
+          name: 'file-integrity',
+          status: 'degraded',
+          latency_ms: 0.2,
+          detail: '5 of 112 monitored objects differ from the approved baseline',
+        },
+      ],
+    };
+    const fixture = TestBed.createComponent(DashboardComponent);
+    fixture.detectChanges();
+    flushInit(USAGE_ADMIN, withReason);
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('.health-detail')?.textContent).toContain(
+      '5 of 112 monitored objects differ',
+    );
+  });
+
+  it('does not invent a reason for a healthy service', () => {
+    const healthyWithDetail: ServiceHealthResponse = {
+      overall: 'healthy',
+      services: [{ name: 'gateway', status: 'healthy', latency_ms: 0.4, detail: 'all clear' }],
+    };
+    const fixture = TestBed.createComponent(DashboardComponent);
+    fixture.detectChanges();
+    flushInit(USAGE_ADMIN, healthyWithDetail);
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('.health-detail')).toBeNull();
+  });
+
+  it('omits the reason row when a degraded probe reported none', () => {
+    const degradedNoReason: ServiceHealthResponse = {
+      overall: 'degraded',
+      services: [{ name: 'redis', status: 'degraded', latency_ms: 2500 }],
+    };
+    const fixture = TestBed.createComponent(DashboardComponent);
+    fixture.detectChanges();
+    flushInit(USAGE_ADMIN, degradedNoReason);
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('.health-list')?.textContent).toContain('degraded');
+    expect(el.querySelector('.health-detail')).toBeNull();
+  });
+
   it('surfaces a degraded overall status', () => {
     const fixture = TestBed.createComponent(DashboardComponent);
     fixture.detectChanges();

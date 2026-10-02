@@ -154,6 +154,34 @@ while true; do
         echo "[Tripwire FIM] No violations detected."
     fi
 
+    # Publish the verdict where the gateway can read it.
+    #
+    # The telemetry alert above lands in the audit stream under tenant_id
+    # "system", which no real tenant ever reads, so the alert was invisible to
+    # every human. Platform integrity is platform health rather than tenant
+    # audit data, so it belongs on the service health surface the dashboard
+    # already renders. A file on a shared volume keeps that honest without
+    # opening another unauthenticated write endpoint for anyone to spoof.
+    #
+    # Written every cycle, including the clean case, because the gateway treats
+    # a missing or stale verdict as degraded. A monitor that has died must not
+    # read as a healthy one.
+    VERDICT_DIR=/var/lib/tripwire/status
+    mkdir -p "${VERDICT_DIR}"
+    if [ "${STATUS}" -ne 0 ]; then
+        VERDICT="violations"
+    else
+        VERDICT="clean"
+    fi
+    VERDICT_TMP="${VERDICT_DIR}/verdict.json.tmp"
+    printf '{"verdict":"%s","objects":%s,"violations":%s,"checked_at":"%s","host":"%s"}\n' \
+        "${VERDICT}" \
+        "${OBJECTS:-0}" \
+        "${VIOLATIONS:-0}" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "${HOSTNAME}" > "${VERDICT_TMP}"
+    mv "${VERDICT_TMP}" "${VERDICT_DIR}/verdict.json"
+
     # Tripwire writes a fresh report on every check and never prunes any of them.
     # At one report per CHECK_INTERVAL_SECONDS that grows without bound and fills
     # the volume, which is what produced the "No space left on device" errors in

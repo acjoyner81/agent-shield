@@ -10,7 +10,7 @@ import requests
 import uuid
 import httpx
 from typing import Annotated, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 import redis
 from redis import asyncio as aioredis
@@ -202,20 +202,83 @@ async def _probe_stripe() -> None:
 
 
 async def _timed_probe(name: str, probe) -> dict[str, object]:
-    """Run one probe, reporting its status and how long it took."""
+    """Run one probe, reporting its status and how long it took.
+
+    The reason travels with the status. A service list that reports only
+    "degraded" tells an operator nothing they can act on, and the reason is
+    already known here, so it is returned rather than only logged.
+    """
     started = time.perf_counter()
+    detail = None
     try:
         await probe()
         status_value = "healthy"
     except Exception as exc:
         logger.warning(f"Health probe '{name}' failed: {exc}")
         status_value = "degraded"
+        detail = str(exc) or exc.__class__.__name__
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
-    return {"name": name, "status": status_value, "latency_ms": latency_ms}
+    return {
+        "name": name,
+        "status": status_value,
+        "latency_ms": latency_ms,
+        "detail": detail,
+    }
 
 
 async def _probe_gateway() -> None:
     return None
+
+
+# Tripwire's verdict path, on a volume the gateway mounts read-only. The monitor
+# rewrites this after every check cycle.
+INTEGRITY_VERDICT_PATH = "/var/lib/tripwire/status/verdict.json"
+
+# A verdict older than this means the monitor is not reporting. Two check cycles
+# at the default interval of 300s leaves room for one slow run without calling a
+# live monitor dead. Treating a stale or absent verdict as degraded is the whole
+# point: a monitor that silently stopped must never present as a healthy one,
+# which is the same lie as a service that has died reporting green.
+INTEGRITY_STALE_SECONDS = 900
+
+
+async def _probe_file_integrity() -> None:
+    """Fail unless Tripwire is reporting a fresh clean verdict."""
+    try:
+        with open(INTEGRITY_VERDICT_PATH, "r", encoding="utf-8") as handle:
+            verdict = json.load(handle)
+    except FileNotFoundError as exc:
+        raise RuntimeError("no Tripwire verdict published yet") from exc
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"Tripwire verdict unreadable: {exc}") from exc
+
+    checked_at = str(verdict.get("checked_at", ""))
+    age = _verdict_age_seconds(checked_at)
+    if age is None:
+        raise RuntimeError(f"Tripwire verdict has no usable timestamp: {checked_at!r}")
+    if age > INTEGRITY_STALE_SECONDS:
+        raise RuntimeError(f"Tripwire verdict is {int(age)}s old, over the {INTEGRITY_STALE_SECONDS}s limit")
+
+    violations = verdict.get("violations", 0)
+    objects = verdict.get("objects", 0)
+    if verdict.get("verdict") != "clean" or violations:
+        raise RuntimeError(
+            f"{violations} of {objects} monitored objects differ from the approved baseline"
+        )
+
+
+def _verdict_age_seconds(checked_at: str) -> Optional[float]:
+    """Seconds since the verdict was written, or None if it cannot be read.
+
+    Compared against UTC because the monitor writes UTC. Naive local comparison
+    would make the verdict look arbitrarily old or new depending on the host
+    clock, and the container has no guarantee of a local timezone.
+    """
+    try:
+        parsed = datetime.strptime(checked_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return (datetime.now(timezone.utc) - parsed).total_seconds()
 
 
 @app.get("/v1/health/services", include_in_schema=False)
@@ -228,8 +291,18 @@ async def health_services(
 
     Probes infrastructure only. The authenticated tenant is never echoed and no
     tenant data is read, so the response is safe for any tenant member to see.
+
+    The file-integrity probe reads Tripwire's published verdict from a volume
+    mounted read only. That is platform integrity state, which belongs here
+    rather than in a tenant's audit stream: the telemetry alert Tripwire also
+    sends lands under tenant_id "system" and is read by no human.
     """
-    probes = [("gateway", _probe_gateway), ("mcp-server", _probe_mcp), ("redis", _probe_redis)]
+    probes = [
+        ("gateway", _probe_gateway),
+        ("mcp-server", _probe_mcp),
+        ("redis", _probe_redis),
+        ("file-integrity", _probe_file_integrity),
+    ]
     if settings.stripe_api_key:
         probes.append(("stripe", _probe_stripe))
 
