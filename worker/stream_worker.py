@@ -55,12 +55,27 @@ class TelemetryWorker:
         """
         event_type = payload.get("type") or payload.get("event_type", "unknown")
         tenant_id = payload.get("tenant_id", "unknown")
-        logger.debug(f"Processing event [{msg_id}] | type={event_type} | tenant={tenant_id}")
+        logger.debug(
+            "Processing event [%s] | type=%s | tenant=%s", msg_id, event_type, tenant_id
+        )
 
         if event_type == "agentshield.token.usage":
-            process_token_event(payload, r_client=self.sync_client)
+            applied = process_token_event(payload, r_client=self.sync_client)
         elif event_type in META_EVENT_COUNTERS:
-            process_meta_event(payload, r_client=self.sync_client)
+            applied = process_meta_event(payload, r_client=self.sync_client)
+        else:
+            return
+
+        # Both handlers report a rejection as False, having routed the event to
+        # the DLQ. Returning normally would let the caller ack it, and the ack
+        # is the only thing that removes it from the stream: a rejection the
+        # DLQ then failed to store would be gone with no trace. Raising here
+        # keeps the message pending so the stream redelivers it.
+        if not applied:
+            raise RuntimeError(
+                "%s event %s was rejected and not recorded; leaving it unacked"
+                % (event_type, payload.get("event_id"))
+            )
 
     async def run(self):
         if not self.client:

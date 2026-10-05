@@ -106,6 +106,34 @@ def get_redis_client() -> redis.Redis:
     return redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 
+# Characters that make a tenant id mean something other than itself once it is
+# pasted into a Redis key pattern. A glob in the id would let one tenant's scan
+# match another tenant's keys, and a colon would let it collide with the key
+# layout it is meant to sit inside.
+_UNSAFE_KEY_CHARS = frozenset(" \t\r\n*?[]\\'")
+
+
+def _validate_key_component(value: str, field: str) -> str:
+    """Reject a value that cannot be safely embedded in a Redis key or glob."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Missing required {field}")
+    if any(ch in _UNSAFE_KEY_CHARS for ch in value) or ":" in value:
+        raise ValueError(f"Unsafe {field}: {value!r}")
+    return value
+
+
+def _claim_id(tenant_id: str, kind: str, event_id: str) -> str:
+    """Namespace the dedup claim by tenant and event kind.
+
+    The ledger is one set shared by every tenant, so claiming on the bare
+    event id made two tenants that happened to emit the same id suppress each
+    other: the second was dropped as a duplicate and its usage was never
+    recorded. CloudEvent ids are only required to be unique within a source,
+    so this collision is routine rather than exotic.
+    """
+    return f"{kind}:{tenant_id}:{event_id}"
+
+
 def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) -> bool:
     """
     Parses and records a token usage CloudEvent idempotently (Spec 0009 AC-1, AC-2, AC-3).
@@ -127,6 +155,7 @@ def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) 
         tenant_id = event.get("tenant_id")
         if not event_id or not tenant_id:
             raise ValueError("Missing required event_id or tenant_id")
+        _validate_key_component(tenant_id, "tenant_id")
 
         # 1. Claim the event and apply the roll-up in a single atomic step, so a
         # duplicate is dropped and a failure leaves nothing behind to redrive.
@@ -142,6 +171,18 @@ def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) 
         total_tokens = int(tokens.get("total", input_tokens + output_tokens))
         model = str(tokens.get("model", "default"))
 
+        # A negative count is arithmetically fine for HINCRBY and factually
+        # meaningless, and it would quietly walk the tenant's totals backwards
+        # and into a bill nobody can explain. Reject rather than clamp: a
+        # negative is a producer bug, and clamping hides it behind a plausible
+        # number. Totals are also re-derived, so reject an incoherent total
+        # rather than recording one that will never add up.
+        if input_tokens < 0 or output_tokens < 0 or total_tokens < 0:
+            raise ValueError(f"Negative token counts in {event_id}")
+        if total_tokens < input_tokens + output_tokens:
+            raise ValueError(f"total_tokens below parts in {event_id}")
+        _validate_key_component(model, "model")
+
         # 3. Update roll-up aggregates
         applied = r_client.eval(
             _APPLY_TOKEN_USAGE,
@@ -150,7 +191,7 @@ def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) 
             f"usage:daily:{tenant_id}:{usage_date}:{model}",
             f"usage:models:{tenant_id}:{usage_date}",
             f"billing:usage:{tenant_id}:{usage_month}",
-            event_id,
+            _claim_id(tenant_id, "token", event_id),
             input_tokens,
             output_tokens,
             total_tokens,
@@ -161,11 +202,18 @@ def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) 
         return True
 
     except Exception as exc:
-        logger.error(f"Failed to process token usage event: {exc}")
+        logger.error("Failed to process token usage event: %s", exc)
+        # The DLQ push is the event's last remaining copy, so a failure here
+        # has to be loud. It used to be swallowed, which meant a Redis that was
+        # rejecting writes also swallowed the DLQ, and the event was gone with
+        # only an unrelated error line to show for it.
         try:
-            r_client.lpush("telemetry:dlq", raw_event if isinstance(raw_event, str) else json.dumps(raw_event))
-        except Exception:
-            pass
+            r_client.lpush(
+                "telemetry:dlq",
+                raw_event if isinstance(raw_event, str) else json.dumps(raw_event),
+            )
+        except Exception as dlq_err:
+            logger.error("Could not write %s to the DLQ: %s", event_id, dlq_err)
         return False
 
 
@@ -177,11 +225,17 @@ def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) 
 # write in one step, so a rejected event leaves no trace and redrives cleanly.
 _APPLY_TOKEN_USAGE = """
 local ledger, daily, models, billing = KEYS[1], KEYS[2], KEYS[3], KEYS[4]
-local kinds = {redis.call('TYPE', ledger).ok, redis.call('TYPE', daily).ok,
-               redis.call('TYPE', billing).ok}
-for i = 1, #kinds do
-  if kinds[i] ~= 'none' and kinds[i] ~= 'set' and kinds[i] ~= 'hash' then
-    return redis.error_reply('metering: expected a set or hash, found a ' .. kinds[i])
+-- Each key is checked against the operation that will actually touch it, not
+-- against a shared 'set or hash' union. A union accepts a set at a hash key,
+-- and models was not checked at all, so both cases failed *after* SADD ledger
+-- committed: the event stayed claimed, the roll-up was half applied, and the
+-- redrive the DLQ entry invited returned 0 and reported success. Billing never
+-- moved, permanently and silently.
+local wanted = {'set', 'hash', 'set', 'hash'}
+for i = 1, 4 do
+  local kind = redis.call('TYPE', KEYS[i]).ok
+  if kind ~= 'none' and kind ~= wanted[i] then
+    return redis.error_reply('metering: KEYS[' .. i .. '] expected a ' .. wanted[i] .. ', found a ' .. kind)
   end
 end
 if redis.call('SADD', ledger, ARGV[1]) == 0 then
@@ -199,10 +253,11 @@ return 1
 
 _APPLY_META_COUNT = """
 local ledger, meta = KEYS[1], KEYS[2]
-local kinds = {redis.call('TYPE', ledger).ok, redis.call('TYPE', meta).ok}
-for i = 1, #kinds do
-  if kinds[i] ~= 'none' and kinds[i] ~= 'set' and kinds[i] ~= 'hash' then
-    return redis.error_reply('metering: expected a set or hash, found a ' .. kinds[i])
+local wanted = {'set', 'hash'}
+for i = 1, 2 do
+  local kind = redis.call('TYPE', KEYS[i]).ok
+  if kind ~= 'none' and kind ~= wanted[i] then
+    return redis.error_reply('metering: KEYS[' .. i .. '] expected a ' .. wanted[i] .. ', found a ' .. kind)
   end
 end
 if redis.call('SADD', ledger, ARGV[1]) == 0 then
@@ -245,6 +300,7 @@ def process_meta_event(raw_event: Any, r_client: Optional[redis.Redis] = None) -
         tenant_id = event.get("tenant_id")
         if not event_id or not tenant_id:
             raise ValueError("Missing required event_id or tenant_id")
+        _validate_key_component(tenant_id, "tenant_id")
 
         timestamp_str = event.get("timestamp") or datetime.now(timezone.utc).isoformat()
         is_new = r_client.eval(
@@ -252,7 +308,7 @@ def process_meta_event(raw_event: Any, r_client: Optional[redis.Redis] = None) -
             2,
             "usage:processed_events",
             meta_daily_key(tenant_id, timestamp_str[:10]),
-            event_id,
+            _claim_id(tenant_id, "meta", event_id),
             counter,
         )
         if not is_new:
@@ -260,11 +316,14 @@ def process_meta_event(raw_event: Any, r_client: Optional[redis.Redis] = None) -
         return True
 
     except Exception as exc:
-        logger.error(f"Failed to process meta event: {exc}")
+        logger.error("Failed to process meta event: %s", exc)
         try:
-            r_client.lpush("telemetry:dlq", raw_event if isinstance(raw_event, str) else json.dumps(raw_event))
-        except Exception:
-            pass
+            r_client.lpush(
+                "telemetry:dlq",
+                raw_event if isinstance(raw_event, str) else json.dumps(raw_event),
+            )
+        except Exception as dlq_err:
+            logger.error("Could not write %s to the DLQ: %s", event_id, dlq_err)
         return False
 
 

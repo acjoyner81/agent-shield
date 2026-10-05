@@ -225,7 +225,10 @@ class TestMetaCounters:
         del event["tenant_id"]
 
         assert process_meta_event(event, r_client=r) is False
-        r.hincrby.assert_not_called()
+        # Not hincrby: the roll-up is applied by a Lua script through eval, so
+        # asserting on hincrby proved nothing about any code path that exists.
+        r.eval.assert_not_called()
+        r.lpush.assert_called_once_with("telemetry:dlq", json.dumps(event))
 
 
 class TestUsageSummaryCost:

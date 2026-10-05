@@ -150,3 +150,89 @@ async def test_process_event_ignores_unrelated_event_types():
     with patch("worker.stream_worker.process_meta_event", return_value=True) as mock_meta:
         await worker.process_event("1000-0", payload)
         mock_meta.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_event_raises_when_metering_rejects_the_event():
+    """A rejection must not read as success to the caller that acks.
+
+    process_token_event reports a rejection by returning False after routing the
+    event to the DLQ. The return value used to be discarded, so the caller
+    appended the id to its ack list exactly as it would for a recorded event.
+    The ack is the only thing that drops a message from the stream, so an event
+    whose DLQ push also failed was destroyed outright.
+    """
+    worker = TelemetryWorker()
+    payload = {
+        "type": "agentshield.token.usage",
+        "event_id": "evt_rejected",
+        "tenant_id": "tenant_alpha",
+    }
+
+    with patch("worker.stream_worker.process_token_event", return_value=False):
+        with pytest.raises(RuntimeError, match="not recorded"):
+            await worker.process_event("1000-0", payload)
+
+
+@pytest.mark.asyncio
+async def test_process_event_raises_when_a_meta_event_is_rejected():
+    worker = TelemetryWorker()
+    payload = {
+        "type": "agentshield.security.authz_failure",
+        "event_id": "evt_meta_rejected",
+        "tenant_id": "tenant_alpha",
+    }
+
+    with patch("worker.stream_worker.process_meta_event", return_value=False):
+        with pytest.raises(RuntimeError, match="not recorded"):
+            await worker.process_event("1000-1", payload)
+
+
+@pytest.mark.asyncio
+async def test_process_event_returns_normally_when_the_event_is_recorded():
+    worker = TelemetryWorker()
+    payload = {
+        "type": "agentshield.token.usage",
+        "event_id": "evt_ok",
+        "tenant_id": "tenant_alpha",
+    }
+
+    with patch("worker.stream_worker.process_token_event", return_value=True):
+        await worker.process_event("1000-2", payload)
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_message_is_left_unacked_and_its_neighbour_is_not():
+    """The ack list is per batch, so one bad event must not take good ones with it."""
+    worker = TelemetryWorker()
+    worker.client = AsyncMock()
+
+    good = {
+        "type": "agentshield.token.usage",
+        "event_id": "evt_good",
+        "tenant_id": "tenant_alpha",
+    }
+    bad = dict(good, event_id="evt_bad")
+    worker.client.xreadgroup.side_effect = [
+        [
+            (
+                STREAM_KEY,
+                [
+                    ("1000-0", {"payload": json.dumps(good)}),
+                    ("1000-1", {"payload": json.dumps(bad)}),
+                ],
+            )
+        ],
+        asyncio.CancelledError(),
+    ]
+
+    with patch(
+        "worker.stream_worker.process_token_event",
+        side_effect=lambda payload, r_client=None: payload["event_id"] == "evt_good",
+    ):
+        try:
+            await worker.run()
+        except asyncio.CancelledError:
+            pass
+
+    worker.client.xack.assert_called_once_with(STREAM_KEY, GROUP_NAME, "1000-0")
