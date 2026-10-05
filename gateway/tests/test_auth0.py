@@ -718,3 +718,62 @@ class TestBindTenantStateDirectly:
 
         assert tenant_id == "1200"
         assert request.state.tenant_id == "1200"
+
+
+class TestDevModeStandInIsRefusedOutsideDevelopment:
+    """The stand-in tokens skip signature verification and grant keys:write.
+
+    They were reachable in any environment because `DEV_MODE` was the literal
+    string "true" in docker-compose.yml, so nothing could turn it off. The flag
+    is now opt-in, and these pin the second line of defence: even with the flag
+    set, the stand-in refuses to answer unless the process is a development
+    build.
+    """
+
+    def test_it_refuses_the_stand_in_when_app_env_is_not_development(
+        self, monkeypatch
+    ):
+        from gateway.auth import verify_token_credentials
+
+        monkeypatch.setenv("DEV_MODE", "true")
+        monkeypatch.setattr(settings, "app_env", "production")
+
+        with pytest.raises(RuntimeError, match="DEV_MODE"):
+            verify_token_credentials("dev-mock-token")
+
+    def test_it_refuses_the_unprivileged_stand_in_too(self, monkeypatch):
+        """The guard runs before the token string is even looked at."""
+        from gateway.auth import verify_token_credentials
+
+        monkeypatch.setenv("DEV_MODE", "true")
+        monkeypatch.setattr(settings, "app_env", "staging")
+
+        with pytest.raises(RuntimeError, match="APP_ENV"):
+            verify_token_credentials("dev-unprivileged-token")
+
+    def test_it_still_serves_the_stand_in_for_a_development_build(
+        self, monkeypatch
+    ):
+        """The guard must not break the documented local workflow."""
+        from gateway.auth import TENANT_CLAIM, verify_token_credentials
+
+        monkeypatch.setenv("DEV_MODE", "true")
+        monkeypatch.setattr(settings, "app_env", "development")
+
+        claims = verify_token_credentials("dev-mock-token")
+
+        assert claims[TENANT_CLAIM] == "tenant_alpha"
+        assert "keys:write" in claims[PERMISSIONS_CLAIM]
+
+    def test_an_unset_flag_never_reaches_the_stand_in(self, monkeypatch):
+        """`DEV_MODE` absent must not behave like falsey-but-enabled."""
+        from gateway.auth import verify_token_credentials
+
+        monkeypatch.delenv("DEV_MODE", raising=False)
+
+        # Falls through to real JWKS verification, which fails on a literal
+        # string rather than returning stand-in claims.
+        with pytest.raises(Exception) as excinfo:
+            verify_token_credentials("dev-mock-token")
+
+        assert not isinstance(excinfo.value, RuntimeError)

@@ -648,7 +648,17 @@ async def get_telemetry_logs(
 
 
 @app.post("/v1/telemetry/logs", include_in_schema=False)
-async def post_telemetry_logs(payload: TelemetryPayload) -> dict[str, str]:
+async def post_telemetry_logs(
+    payload: TelemetryPayload,
+    tenant_id: Annotated[str, Depends(resolve_active_tenant)],
+) -> dict[str, str]:
+    # The tenant comes from the verified credential, never from the body. This
+    # route used to declare no auth dependency at all and write
+    # `payload.tenant_id` straight into `telemetry_history`, so an anonymous
+    # caller could forge audit rows in any tenant's stream and, because the list
+    # is trimmed to HISTORY_LIMIT, evict that tenant's real rows.
+    payload.tenant_id = tenant_id
+
     # Ship to Splunk HEC (Port 8088)
     try:
         # Mocking the HEC request structure

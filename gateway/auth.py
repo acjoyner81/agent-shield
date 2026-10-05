@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from functools import lru_cache
 from os import environ
@@ -23,6 +24,8 @@ TENANT_CLAIM = "https://api.agentshield.local/tenant_id"
 PERMISSIONS_CLAIM = "https://api.agentshield.local/permissions"
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+logger = logging.getLogger(__name__)
 
 _r = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
@@ -48,17 +51,37 @@ def verify_token_credentials(token: str) -> dict[str, object]:
     """Validate an Auth0 access token string and return its claims."""
     dev_mode = environ.get("DEV_MODE")
     if dev_mode == "true":
+        # A dev stand-in grants tools:execute and keys:write with no signature
+        # check, so it is only ever safe while this process is a local
+        # development build. Refuse it anywhere else rather than trusting the
+        # deployment to remember the flag, which is how it was left hardcoded
+        # "true" in compose and served credentials to anything that could reach
+        # the port.
+        if settings.app_env != "development":
+            raise RuntimeError(
+                "DEV_MODE is enabled while APP_ENV is "
+                f"{settings.app_env!r}. The dev stand-in tokens skip signature "
+                "verification and grant keys:write, so they are refused outside "
+                "development. Set DEV_MODE=false, or APP_ENV=development."
+            )
         # These stand-ins must mirror the claim names Auth0 actually issues, or
         # they would test a token shape that cannot exist and hide a real
         # mismatch. In particular `permissions` is namespaced, because the bare
         # name is reserved by Auth0's RBAC and never arrives on a real token.
         if token == "dev-mock-token":
+            logger.warning(
+                "served unauthenticated dev stand-in claims for dev-mock-token"
+            )
             return {
                 "sub": "user_dev_123",
                 TENANT_CLAIM: "tenant_alpha",
                 PERMISSIONS_CLAIM: ["tools:execute", "logs:read", "keys:write"],
             }
         if token == "dev-unprivileged-token":
+            logger.warning(
+                "served unauthenticated dev stand-in claims for "
+                "dev-unprivileged-token"
+            )
             return {
                 "sub": "user_dev_456",
                 TENANT_CLAIM: "tenant_alpha",

@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from unittest.mock import MagicMock, patch
@@ -60,6 +61,42 @@ def test_telemetry_logs_get_requires_auth(mock_redis):
     assert mock_redis.lrange.called is False
 
 
+def test_telemetry_logs_post_requires_auth(mock_redis):
+    """An anonymous POST must not reach Redis.
+
+    This route used to declare no auth dependency, so `verify_rate_limit` was its
+    only guard and that swallows the 401 from `resolve_active_tenant`. An
+    anonymous caller could therefore write audit rows attributed to any tenant.
+    """
+    mock_redis.lpush = MagicMock()
+    response = client.post(
+        "/v1/telemetry/logs",
+        json={"tenant_id": "tenant_beta", "level": "INFO", "message": "forged"},
+    )
+    assert response.status_code == 401
+    mock_redis.lpush.assert_not_called()
+
+
+def test_telemetry_logs_post_tenant_comes_from_the_credential(mock_redis):
+    """A caller supplied tenant id must lose to the verified claim."""
+    mock_redis.lpush = MagicMock()
+    mock_redis.ltrim = MagicMock()
+    with patch("gateway.main.requests.post") as mock_post:
+        mock_post.return_value = MagicMock()
+        mock_post.return_value.raise_for_status = lambda: None
+        response = client.post(
+            "/v1/telemetry/logs",
+            headers={
+                "Authorization": "Bearer dev-mock-token",
+                "X-Tenant-ID": "tenant_beta",
+            },
+            json={"tenant_id": "tenant_beta", "level": "INFO", "message": "spoofed"},
+        )
+    assert response.status_code == 200
+    written = mock_redis.lpush.call_args[0][1]
+    assert json.loads(written)["tenant_id"] == "tenant_alpha"
+
+
 def test_telemetry_logs_post_accepts_payload(mock_redis):
     """Verify /v1/telemetry/logs POST accepts and processes telemetry payload."""
     mock_redis.lpush = MagicMock()
@@ -69,6 +106,7 @@ def test_telemetry_logs_post_accepts_payload(mock_redis):
         mock_post.return_value.raise_for_status = lambda: None
         response = client.post(
             "/v1/telemetry/logs",
+            headers={"Authorization": "Bearer dev-mock-token"},
             json={"tenant_id": "tenant_alpha", "level": "INFO", "message": "Test telemetry"},
         )
     assert response.status_code == 200
@@ -82,6 +120,7 @@ def test_telemetry_logs_post_splunk_failure(mock_redis):
     with patch("gateway.main.requests.post", side_effect=Exception("Connection refused")):
         response = client.post(
             "/v1/telemetry/logs",
+            headers={"Authorization": "Bearer dev-mock-token"},
             json={"tenant_id": "tenant_alpha", "level": "INFO", "message": "Test telemetry"},
         )
     assert response.status_code == 200

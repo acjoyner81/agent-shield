@@ -37,7 +37,7 @@ services:
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-dev-zymaiayb0afkpn7n.us.auth0.com}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.agentshield.local}
       AUTH0_ISSUER: ${AUTH0_ISSUER:-https://dev-zymaiayb0afkpn7n.us.auth0.com/}
-      DEV_MODE: "true"
+      DEV_MODE: "${DEV_MODE:-false}"
       STRIPE_API_KEY: ${STRIPE_API_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-http://localhost:4200/billing/success}
