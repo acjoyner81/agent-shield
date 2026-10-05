@@ -145,7 +145,13 @@ async def run_aggregator():
                 logger.error(f"Max retries reached. Moving {len(logs)} logs to {DLQ_KEY}.")
                 async with r.pipeline() as pipe:
                     for log in logs:
-                        pipe.rpush(DLQ_KEY, log)
+                        await r.eval(
+        _DLQ_LUA_SCRIPT,
+        1,
+        DLQ_KEY,
+        TELEMETRY_DLQ_MAX,
+        log,
+    )
                     await pipe.execute()
 
                 # Also dump to stdout as emergency fallback
