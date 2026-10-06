@@ -1,6 +1,7 @@
 """Application configuration loaded from environment variables."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 
 
 class Settings(BaseSettings):
@@ -38,6 +39,39 @@ class Settings(BaseSettings):
     enterprise_rpm: int = 1000
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
+
+    @model_validator(mode="after")
+    def _refuse_a_webhook_secret_that_cannot_be_one(self) -> "Settings":
+        """Fail at startup when the webhook secret is unusable outside dev.
+
+        The Stripe library refuses an empty secret, so a missing
+        STRIPE_WEBHOOK_SECRET produces a 400 on every webhook rather than a
+        forged one being accepted. That is safe and silent, which is its own
+        problem: subscriptions stop updating, nothing in the logs says why, and
+        an operator reads a healthy service and a stalled tenant list. Raising
+        here turns that into an unmissable startup failure instead.
+
+        Only dev and test are exempt. A placeholder that carries the real
+        whsec_ prefix is worse than empty, because the library accepts it and
+        anyone holding a published value can sign arbitrary events.
+        """
+        if self.app_env in ("development", "test"):
+            return self
+        secret = self.stripe_webhook_secret.strip()
+        if not secret:
+            raise ValueError(
+                "STRIPE_WEBHOOK_SECRET is required when APP_ENV is not development or "
+                "test. Without it every Stripe webhook is rejected and subscriptions "
+                "silently stop updating."
+            )
+        if not secret.startswith("whsec_"):
+            raise ValueError("STRIPE_WEBHOOK_SECRET must start with 'whsec_'.")
+        return self
+
+    def can_verify_webhooks(self) -> bool:
+        """Whether a webhook signature can actually be verified right now."""
+        secret = self.stripe_webhook_secret.strip()
+        return bool(secret) and secret.startswith("whsec_")
 
 
 settings = Settings()

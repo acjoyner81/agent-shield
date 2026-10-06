@@ -56,6 +56,13 @@ PERMISSIONS_CLAIM = f"{CLAIM_NAMESPACE}/permissions"
 
 # The enforced permission set. `logs:read` is deliberately absent: nothing in
 # the gateway checks it, so granting it implies a protection that does not exist.
+#
+# `telemetry:admin` is deliberately absent here. It gates replaying the dead
+# letter queue and reading its fleet-wide depth, which is a platform operator
+# action rather than a tenant one, so it is granted explicitly to operators and
+# not by default. It is still a real, grantable scope: `gateway/main.py` checks
+# for it, and `POST /v1/telemetry/redrive` depends on `require_permission`, so an
+# operator key carrying it is the supported way to drain stranded telemetry.
 DEFAULT_PERMISSIONS = ["tools:execute", "keys:write", "billing:admin"]
 
 DEFAULT_AUDIENCE = "https://api.agentshield.local"

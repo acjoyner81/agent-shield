@@ -156,7 +156,9 @@ class TestProjection:
             def __init__(self):
                 self.queued = []
 
-            def xadd(self, stream, fields):
+            def xadd(self, stream, fields, **kwargs):
+                # `maxlen` is passed by the capped enqueue; accepting it here
+                # keeps this fake honest about the real redis-py signature.
                 self.queued.append(fields)
                 return "1-0"
 

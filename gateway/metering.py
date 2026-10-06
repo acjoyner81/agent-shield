@@ -208,7 +208,7 @@ def process_token_event(raw_event: str, r_client: Optional[redis.Redis] = None) 
         # rejecting writes also swallowed the DLQ, and the event was gone with
         # only an unrelated error line to show for it.
         try:
-            r_client.lpush(
+            r_client.rpush(
                 "telemetry:dlq",
                 raw_event if isinstance(raw_event, str) else json.dumps(raw_event),
             )
@@ -318,7 +318,7 @@ def process_meta_event(raw_event: Any, r_client: Optional[redis.Redis] = None) -
     except Exception as exc:
         logger.error("Failed to process meta event: %s", exc)
         try:
-            r_client.lpush(
+            r_client.rpush(
                 "telemetry:dlq",
                 raw_event if isinstance(raw_event, str) else json.dumps(raw_event),
             )

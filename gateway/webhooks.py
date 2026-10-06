@@ -19,7 +19,19 @@ PRODUCT_TIER_MAP = {
 @router.post("/api/v1/billing/webhook", include_in_schema=False)
 async def stripe_webhook(request: Request, stripe_signature: str = Header(None)):
     payload = await request.body()
-    
+
+    # Refuse before touching the library. The library rejects an empty secret
+    # anyway, but only as a side effect of wanting a whsec_ prefix, and it
+    # reports that as a bad signature, so an operator reads a webhook problem
+    # where the real answer is a missing setting. This route is unauthenticated
+    # by design, so a refusal has to be unambiguous.
+    if not settings.can_verify_webhooks():
+        logger.error(
+            "Refusing a Stripe webhook: STRIPE_WEBHOOK_SECRET is unset or is not a "
+            "whsec_ value. Subscription state will not update until it is set."
+        )
+        raise HTTPException(status_code=503, detail="Webhook signature verification unavailable")
+
     try:
         event = stripe.Webhook.construct_event(
             payload, stripe_signature, settings.stripe_webhook_secret

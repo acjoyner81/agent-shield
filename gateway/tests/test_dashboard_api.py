@@ -216,7 +216,7 @@ class TestMetaCounters:
     def test_malformed_event_routes_to_dlq(self):
         r = MagicMock()
         assert process_meta_event("not json at all", r_client=r) is False
-        r.lpush.assert_called_once_with("telemetry:dlq", "not json at all")
+        r.rpush.assert_called_once_with("telemetry:dlq", "not json at all")
 
     def test_event_without_tenant_routes_to_dlq(self):
         r = MagicMock()
@@ -228,7 +228,7 @@ class TestMetaCounters:
         # Not hincrby: the roll-up is applied by a Lua script through eval, so
         # asserting on hincrby proved nothing about any code path that exists.
         r.eval.assert_not_called()
-        r.lpush.assert_called_once_with("telemetry:dlq", json.dumps(event))
+        r.rpush.assert_called_once_with("telemetry:dlq", json.dumps(event))
 
 
 class TestUsageSummaryCost:
@@ -450,11 +450,15 @@ class TestHealthServices:
 
     @pytest.fixture(autouse=True)
     def healthy_probes(self):
+        # Splunk is patched in too. A probe added to this surface is exercised by
+        # every "everything is healthy" assertion here, so leaving the real one
+        # running makes this file's tests depend on whether the developer happens
+        # to have a collector configured.
         with patch("gateway.main._probe_redis", new=AsyncMock()), patch(
             "gateway.main._probe_mcp", new=AsyncMock()
         ), patch("gateway.main._probe_stripe", new=AsyncMock()), patch(
             "gateway.main._probe_file_integrity", new=AsyncMock()
-        ):
+        ), patch("gateway.main._probe_splunk", new=AsyncMock()):
             yield
 
     def test_lists_gateway_mcp_and_redis_with_status_and_latency(self):

@@ -12,6 +12,17 @@ logger = logging.getLogger("agentshield.telemetry")
 # /v1/telemetry/logs ingest path applies, so both writers agree on the cap.
 HISTORY_LIMIT = 100
 
+# How many un-shipped events the queue retains.
+#
+# The stream used to grow without bound. Nothing in this file ever acknowledged
+# or trimmed an entry, so a gateway that outran Splunk, or one shipping to a
+# collector that was down for days, grew a queue that could not be inspected, and
+# whose only visible symptom was memory. An approximate cap is the right trade
+# here: trimming exactly costs an O(N) delete per write, and the events dropped
+# by an approximate trim are the ones a consumer that has fallen far enough
+# behind has not read anyway.
+QUEUE_MAXLEN = 100_000
+
 VALID_EVENT_TYPES = {
     "agentshield.telemetry.request.completed",
     "agentshield.token.usage",
@@ -182,7 +193,9 @@ def emit_event(
 
     if client:
         try:
-            client.xadd("telemetry:queue", {"payload": payload})
+            # Capped at the producer, because the producer is the only party that
+            # knows whether the pipeline is keeping up.
+            client.xadd("telemetry:queue", {"payload": payload}, maxlen=QUEUE_MAXLEN, approximate=True)
         except Exception as e:
             logger.error(f"Failed to push to Redis stream: {e}")
 

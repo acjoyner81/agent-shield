@@ -136,6 +136,14 @@ async def stripe_webhook(
     """AC-5: Verify signature and process subscription events."""
     payload = await request.body()
 
+    # Refuse before touching the library. This route is unauthenticated by
+    # design, so an unset secret must not read as a bad signature: an operator
+    # would go looking at Stripe's dashboard instead of at the missing setting.
+    if not settings.can_verify_webhooks():
+        raise HTTPException(
+            status_code=503, detail="Webhook signature verification unavailable"
+        )
+
     try:
         event = stripe.Webhook.construct_event(
             payload, stripe_signature, settings.stripe_webhook_secret

@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import time
-import requests
 import uuid
 import httpx
 from typing import Annotated, Optional
@@ -14,14 +13,19 @@ from datetime import datetime, timezone
 
 import redis
 from redis import asyncio as aioredis
-from fastapi import Depends, FastAPI, HTTPException, Header, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Header, Query, Request, status
 from pydantic import BaseModel, ConfigDict
 
 from config.settings import settings
 from gateway.auth import verify_jwt, resolve_active_tenant, require_permission
 from gateway.rate_limit import verify_rate_limit
 from gateway.pricing import estimate_cost_usd
-from gateway.telemetry import HISTORY_LIMIT, emit_request_completed, emit_token_usage
+from gateway.telemetry import (
+    HISTORY_LIMIT,
+    emit_event,
+    emit_request_completed,
+    emit_token_usage,
+)
 from gateway.webhooks import router as webhook_router
 from gateway.billing import router as billing_router
 from gateway.metering import router as metering_router
@@ -201,6 +205,132 @@ async def _probe_stripe() -> None:
         response.raise_for_status()
 
 
+# ---------------------------------------------------------------------------
+# Splunk
+#
+# Read only on purpose. A GET to the collector's /health endpoint does not write
+# to the index, so polling this surface every minute does not turn the gateway's
+# own health check into a source of telemetry.
+#
+# The CA file is read on every probe instead of captured at import, because
+# Splunk publishes it during its boot. A gateway container that starts first must
+# report degraded with that reason rather than refusing to start, and must start
+# reporting healthy on its own once the file lands.
+# ---------------------------------------------------------------------------
+SPLUNK_HEC_URL = os.getenv("SPLUNK_HEC_URL", "https://splunk:8088/services/collector/event")
+SPLUNK_HEC_TOKEN_ENV = os.getenv("SPLUNK_HEC_TOKEN", "")
+SPLUNK_HEC_CA = os.getenv("SPLUNK_HEC_CA", "/etc/agentshield/splunk-ca/ca.crt")
+
+# A ship that was attempted and has not succeeded inside this window means the
+# pipeline is stalled, which is the failure mode that hid for three days. The
+# file-integrity probe uses the same shape for the same reason.
+SPLUNK_SHIP_STALE_SECONDS = int(os.getenv("SPLUNK_HEALTH_MAX_SHIP_AGE_SEC", "300"))
+
+# Written by the aggregator, read here.
+SHIP_RECEIPT_KEY = "telemetry:ship"
+TELEMETRY_QUEUE_KEY = "telemetry:queue"
+DLQ_KEY = "telemetry:dlq"
+DLQ_DROPPED_KEY = "telemetry:dlq:dropped"
+REDRIVE_LOCK_KEY = "telemetry:redrive:lock"
+
+# Replay is one script for the reason documented on the endpoint: a read then a
+# write leaves a window where an interrupted replay has destroyed the entry it
+# was moving without having written its replacement.
+#
+# RPOP matches the RPUSH every dead letter writer uses, so a replay reaches every
+# entry. While the writers disagreed on the end, a replay could never drain the
+# queue and the trim boundary was undefined.
+REDRIVE_LUA = """
+local limit = tonumber(ARGV[1])
+local moved = 0
+while moved < limit do
+  local entry = redis.call('RPOP', KEYS[1])
+  if not entry then
+    break
+  end
+  redis.call('XADD', KEYS[2], '*', 'payload', entry)
+  moved = moved + 1
+end
+return moved
+"""
+
+# Only the holder releases, so a replay that ran past the lock's expiry cannot
+# clear a lock a later replay now owns.
+RELEASE_LOCK_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+
+def _epoch_seconds(value) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _probe_splunk() -> None:
+    """Report whether telemetry is actually reaching Splunk.
+
+    Three separate things are checked, and each names itself in the reason:
+
+    1. the collector answers on TLS, verified against the published authority
+    2. a ship that was attempted has succeeded recently enough
+    3. events are queued but nothing has ever shipped
+
+    Without the third, a cold start reports healthy while silently discarding
+    every event, which is the state this whole spec exists to end.
+    """
+    if not SPLUNK_HEC_TOKEN_ENV:
+        raise RuntimeError("SPLUNK_HEC_TOKEN is not configured, so shipping cannot be attempted")
+
+    if not os.path.exists(SPLUNK_HEC_CA):
+        # Not fatal: Splunk publishes its authority minutes into boot, and the
+        # gateway usually starts first. The reason is actionable, which is the
+        # whole point of carrying it.
+        raise RuntimeError(
+            f"the Splunk certificate authority {SPLUNK_HEC_CA} is not published yet"
+        )
+
+    async with httpx.AsyncClient(verify=SPLUNK_HEC_CA) as client:
+        response = await client.post(
+            SPLUNK_HEC_URL,
+            headers={"Authorization": f"Splunk {SPLUNK_HEC_TOKEN_ENV}"},
+            content="",
+            timeout=PROBE_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+
+    client = aioredis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        receipt = await client.hgetall(SHIP_RECEIPT_KEY)
+        now = time.time()
+
+        last_attempt = _epoch_seconds(receipt.get("last_attempt"))
+        if last_attempt is not None:
+            age = now - last_attempt
+            if age > SPLUNK_SHIP_STALE_SECONDS:
+                failures = receipt.get("consecutive_failures") or "?"
+                reason = receipt.get("last_error") or "no reason recorded"
+                raise RuntimeError(
+                    f"the last ship attempt is {int(age)}s old, over the "
+                    f"{SPLUNK_SHIP_STALE_SECONDS}s limit ({failures} consecutive "
+                    f"failures): {reason}"
+                )
+
+        last_success = _epoch_seconds(receipt.get("last_success"))
+        if last_success is None:
+            queued = await client.xlen(TELEMETRY_QUEUE_KEY)
+            if queued:
+                raise RuntimeError(
+                    f"{queued} events are queued and no ship has ever succeeded"
+                )
+    finally:
+        await client.aclose()
+
+
 async def _timed_probe(name: str, probe) -> dict[str, object]:
     """Run one probe, reporting its status and how long it took.
 
@@ -292,6 +422,7 @@ def _verdict_age_seconds(checked_at: str) -> Optional[float]:
 @app.get("/v1/health/services", include_in_schema=False)
 @app.get("/api/v1/health/services", include_in_schema=False)
 async def health_services(
+    request: Request,
     tenant_id: Annotated[str, Depends(resolve_active_tenant)],
 ) -> dict[str, object]:
     """
@@ -310,16 +441,39 @@ async def health_services(
         ("mcp-server", _probe_mcp),
         ("redis", _probe_redis),
         ("file-integrity", _probe_file_integrity),
+        ("splunk", _probe_splunk),
     ]
     if settings.stripe_api_key:
         probes.append(("stripe", _probe_stripe))
 
     services = [await _timed_probe(name, probe) for name, probe in probes]
 
-    return {
+    response: dict[str, object] = {
         "services": services,
         "overall": "degraded" if any(s["status"] != "healthy" for s in services) else "healthy",
     }
+
+    # Dead letter depth and drop totals are a fleet-wide multi-tenant aggregate,
+    # so they sit behind `telemetry:admin` in their own object rather than mixed
+    # into the per service entries, which stay safe for any tenant member to see.
+    # Read straight off request state rather than through require_permission:
+    # that dependency raises 403, and a health check must still answer for a
+    # tenant who cannot see these counts.
+    if "telemetry:admin" in getattr(request.state, "permissions", set()):
+        response["metrics"] = await _telemetry_metrics()
+
+    return response
+
+
+async def _telemetry_metrics() -> dict[str, int]:
+    """Read the dead letter queue's depth and lifetime drop count."""
+    client = aioredis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        depth = int(await client.llen("telemetry:dlq") or 0)
+        dropped = int(await client.get("telemetry:dlq:dropped") or 0)
+        return {"dlq_depth": depth, "dlq_dropped": dropped}
+    finally:
+        await client.aclose()
 
 
 # Setup OpenAPI security schemes
@@ -343,6 +497,10 @@ def custom_openapi():
         "/health",
         "/v1/health/services",
         "/v1/telemetry/logs",
+        # Operational, not contract: replaying the dead letter queue is an
+        # operator action against platform-wide state, and publishing it would
+        # also break the published-schema regression test.
+        "/v1/telemetry/redrive",
         "/v1/billing/webhook",
         "/v1/webhooks/stripe",
     }
@@ -659,27 +817,101 @@ async def post_telemetry_logs(
     # is trimmed to HISTORY_LIMIT, evict that tenant's real rows.
     payload.tenant_id = tenant_id
 
-    # Ship to Splunk HEC (Port 8088)
-    try:
-        # Mocking the HEC request structure
-        splunk_event = {
-            "event": payload.model_dump(),
-            "sourcetype": "agent_shield_telemetry"
-        }
-        # We use a timeout to prevent the gateway from hanging if Splunk is slow
-        requests.post(
-            "http://splunk:8088/services/collector", 
-            json=splunk_event, 
-            timeout=0.5
-        )
-    except Exception as e:
-        print(f"Splunk HEC failure: {e}")
+    # Enqueue only. This route used to POST to the collector itself, over plain
+    # HTTP against a TLS-only port, and threw the result away. So this repository
+    # had three call sites into the collector with three different configurations,
+    # and the one on the request path was broken in a way that could never be
+    # detected: the response body was never inspected, so a rejection looked
+    # identical to a delivery. Routing through the shared emitter means one
+    # configuration, verified TLS, and an `event_id` the caller can trace through
+    # the queue and the dead letter queue.
+    #
+    # `emit_event` writes the portal's read model too, so the separate lpush and
+    # ltrim below are gone: keeping them would put this payload in the history
+    # list twice, once as a raw payload and once as a flattened row, and only one
+    # of those shapes has the fields the stream renders.
+    #
+    # `TelemetryPayload.timestamp` is an optional float with no defined unit, so it
+    # is not forwarded; the envelope owns the clock.
+    payload_json = emit_event(
+        tenant_id=tenant_id,
+        event_type="agentshield.telemetry.request.completed",
+        data={
+            "method": "POST",
+            "path": "/v1/telemetry/logs",
+            "status_code": 202,
+            "latency_ms": 0.0,
+            "level": payload.level,
+            "message": payload.message,
+        },
+        redis_client=r,
+    )
 
-    # Also keep a short-term history in Redis for the GET endpoint to eventually use
-    r.lpush("telemetry_history", json.dumps(payload.model_dump()))
-    r.ltrim("telemetry_history", 0, HISTORY_LIMIT - 1) # Keep last HISTORY_LIMIT
-    
-    return {"status": "accepted"}
+    return {"status": "accepted", "event_id": json.loads(payload_json)["event_id"]}
+
+
+@app.post("/v1/telemetry/redrive", include_in_schema=False)
+async def post_telemetry_redrive(
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    _admin: Annotated[bool, Depends(require_permission("telemetry:admin"))] = True,
+) -> dict[str, object]:
+    """Replay dead lettered telemetry back onto the queue.
+
+    The move is one Lua script, not a read followed by a write. This project has
+    shipped that exact bug once already, in the metering engine: it claimed an
+    event and then applied the rollup, and a crash between the two stranded the
+    event so its dead letter entry redrove as a duplicate and the usage was lost
+    for good. One script makes that window unobservable.
+
+    Returns `moved: 0` with the collector's last error rather than failing while
+    Splunk is unreachable, because replaying into a broken collector just refills
+    the dead letter queue while reporting progress that never becomes telemetry.
+    """
+    client = aioredis.from_url(settings.redis_url, decode_responses=True)
+    lock_token = uuid.uuid4().hex
+    try:
+        receipt = await client.hgetall(SHIP_RECEIPT_KEY)
+        last_error = receipt.get("last_error") or ""
+        last_success = _epoch_seconds(receipt.get("last_success"))
+        last_attempt = _epoch_seconds(receipt.get("last_attempt"))
+        dropped_total = int(await client.get("telemetry:dlq:dropped") or 0)
+
+        async def outcome(moved: int) -> dict[str, object]:
+            return {
+                "moved": moved,
+                "remaining": int(await client.llen("telemetry:dlq") or 0),
+                "dropped_total": dropped_total,
+                "last_error": last_error,
+            }
+
+        # A recorded failure that has not been followed by a success means the
+        # collector is still refusing. Replaying now would only move entries from
+        # one list to another and spend the queue's capacity doing it.
+        unresolved = last_error and (
+            last_success is None or (last_attempt is not None and last_attempt > last_success)
+        )
+        if unresolved:
+            return await outcome(0)
+
+        # The lock is not what makes replay safe, the atomic pop is. It exists so
+        # a second concurrent replay gets a 409 instead of quietly competing for
+        # the same entries and reporting a misleading `moved`. Released explicitly,
+        # and the expiry covers a holder that dies mid-replay.
+        acquired = await client.set(REDRIVE_LOCK_KEY, lock_token, nx=True, ex=30)
+        if not acquired:
+            raise HTTPException(
+                status_code=409,
+                detail="A telemetry replay is already running; retry shortly.",
+            )
+        try:
+            moved = int(
+                await client.eval(REDRIVE_LUA, 2, DLQ_KEY, TELEMETRY_QUEUE_KEY, limit)
+            )
+            return await outcome(moved)
+        finally:
+            await client.eval(RELEASE_LOCK_LUA, 1, REDRIVE_LOCK_KEY, lock_token)
+    finally:
+        await client.aclose()
 
 
 @app.get("/api/v1/protected", include_in_schema=False)

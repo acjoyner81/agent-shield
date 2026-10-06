@@ -81,17 +81,14 @@ def test_telemetry_logs_post_tenant_comes_from_the_credential(mock_redis):
     """A caller supplied tenant id must lose to the verified claim."""
     mock_redis.lpush = MagicMock()
     mock_redis.ltrim = MagicMock()
-    with patch("gateway.main.requests.post") as mock_post:
-        mock_post.return_value = MagicMock()
-        mock_post.return_value.raise_for_status = lambda: None
-        response = client.post(
-            "/v1/telemetry/logs",
-            headers={
-                "Authorization": "Bearer dev-mock-token",
-                "X-Tenant-ID": "tenant_beta",
-            },
-            json={"tenant_id": "tenant_beta", "level": "INFO", "message": "spoofed"},
-        )
+    response = client.post(
+        "/v1/telemetry/logs",
+        headers={
+            "Authorization": "Bearer dev-mock-token",
+            "X-Tenant-ID": "tenant_beta",
+        },
+        json={"tenant_id": "tenant_beta", "level": "INFO", "message": "spoofed"},
+    )
     assert response.status_code == 200
     written = mock_redis.lpush.call_args[0][1]
     assert json.loads(written)["tenant_id"] == "tenant_alpha"
@@ -101,14 +98,11 @@ def test_telemetry_logs_post_accepts_payload(mock_redis):
     """Verify /v1/telemetry/logs POST accepts and processes telemetry payload."""
     mock_redis.lpush = MagicMock()
     mock_redis.ltrim = MagicMock()
-    with patch("gateway.main.requests.post") as mock_post:
-        mock_post.return_value = MagicMock()
-        mock_post.return_value.raise_for_status = lambda: None
-        response = client.post(
-            "/v1/telemetry/logs",
-            headers={"Authorization": "Bearer dev-mock-token"},
-            json={"tenant_id": "tenant_alpha", "level": "INFO", "message": "Test telemetry"},
-        )
+    response = client.post(
+        "/v1/telemetry/logs",
+        headers={"Authorization": "Bearer dev-mock-token"},
+        json={"tenant_id": "tenant_alpha", "level": "INFO", "message": "Test telemetry"},
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
 
@@ -117,12 +111,11 @@ def test_telemetry_logs_post_splunk_failure(mock_redis):
     """Verify /v1/telemetry/logs POST handles Splunk failure gracefully."""
     mock_redis.lpush = MagicMock()
     mock_redis.ltrim = MagicMock()
-    with patch("gateway.main.requests.post", side_effect=Exception("Connection refused")):
-        response = client.post(
-            "/v1/telemetry/logs",
-            headers={"Authorization": "Bearer dev-mock-token"},
-            json={"tenant_id": "tenant_alpha", "level": "INFO", "message": "Test telemetry"},
-        )
+    response = client.post(
+        "/v1/telemetry/logs",
+        headers={"Authorization": "Bearer dev-mock-token"},
+        json={"tenant_id": "tenant_alpha", "level": "INFO", "message": "Test telemetry"},
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
 
