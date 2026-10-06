@@ -251,10 +251,16 @@ def test_key_example_does_not_return_a_live_secret(schema):
     """AC-5: the key example shows a masked prefix, not a usable key.
 
     Pydantic omits `None` fields from an example, so the secret is absent rather
-    than null. Either way no usable secret is published. The example is also held
-    to the real runtime shape from `_mask_prefix`, so a client written against the
-    docs does not get a string the API never returns.
+    than null. Either way no usable secret is published. The example is held to
+    the runtime mask shape by asserting it is a fixed point of `_mask_prefix`,
+    rather than equality against a named raw literal: a secret-scrubbing rewrite
+    replaces those literals with placeholder text on both sides of an equality
+    differently, which leaves this assertion describing a string the API never
+    returns.
     """
     example = schema["components"]["schemas"]["APIKeyResponse"]["examples"][0]["value"]
-    assert example["key_prefix"] == _mask_prefix("***REMOVED***")
+    prefix = example["key_prefix"]
+    assert prefix.startswith("sk_live_")
+    assert prefix == _mask_prefix(prefix)
+    assert not re.fullmatch(r"sk_live_[A-Za-z0-9_-]{20,}", prefix)
     assert not example.get("secret_key")
