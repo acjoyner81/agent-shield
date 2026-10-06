@@ -5,7 +5,7 @@ import os
 import sys
 import time
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import httpx
 import redis.asyncio as redis
@@ -24,11 +24,13 @@ SPLUNK_HEC_TOKEN = os.environ.get("SPLUNK_HEC_TOKEN", "mock-token")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "100"))
 BATCH_TIMEOUT_SEC = int(os.environ.get("BATCH_TIMEOUT_SEC", "5"))
+TELEMETRY_DLQ_MAX = int(os.environ.get("TELEMETRY_DLQ_MAX", "10000"))
 MAX_RETRIES = 5
 
 # Redis Keys
 QUEUE_KEY = "telemetry:queue"
 DLQ_KEY = "telemetry:dlq"
+DLQ_DROPPED_KEY = "telemetry:dlq:dropped"
 GROUP_NAME = "telemetry-aggregator"
 CONSUMER_NAME = f"telemetry-aggregator-{os.getpid()}"
 
@@ -76,6 +78,49 @@ async def dump_to_stdout(batch: List[str]):
         # Ensure it's one JSON object per line
         print(log)
         sys.stdout.flush()
+
+# The counter lives in the same script as the trim that caused the overflow, so
+# the reported drop total can never drift from the data it describes. The push
+# is RPUSH and the trim keeps the tail, so every writer adds at one end and a
+# replay that pops that same end can always reach every entry.
+DLQ_PUSH_LUA = """
+local key = KEYS[1]
+local maxn = tonumber(ARGV[1])
+local n = #ARGV - 1
+if n <= 0 then
+  return {0, 0, redis.call('LLEN', key)}
+end
+if n == 1 then
+  redis.call('RPUSH', key, ARGV[2])
+else
+  redis.call('RPUSH', key, unpack(ARGV, 2))
+end
+local dropped = 0
+if maxn > 0 then
+  local after = redis.call('LLEN', key)
+  if after > maxn then
+    dropped = after - maxn
+    redis.call('LTRIM', key, -maxn, -1)
+    redis.call('INCRBY', KEYS[2], dropped)
+  end
+end
+return {n, dropped, redis.call('LLEN', key)}
+"""
+
+
+async def dlq_push(r, payloads: List[str], max_entries: int) -> Tuple[int, int, int]:
+    """Move a batch to the dead letter queue. Returns (pushed, dropped, depth)."""
+    if not payloads:
+        return 0, 0, int(await r.llen(DLQ_KEY))
+    result = await r.eval(
+        DLQ_PUSH_LUA,
+        2,
+        DLQ_KEY,
+        DLQ_DROPPED_KEY,
+        str(max_entries),
+        *payloads,
+    )
+    return int(result[0]), int(result[1]), int(result[2])
 
 async def ensure_consumer_group(client):
     try:
@@ -143,16 +188,9 @@ async def run_aggregator():
             else:
                 # Move to DLQ
                 logger.error(f"Max retries reached. Moving {len(logs)} logs to {DLQ_KEY}.")
-                async with r.pipeline() as pipe:
-                    for log in logs:
-                        await r.eval(
-        _DLQ_LUA_SCRIPT,
-        1,
-        DLQ_KEY,
-        TELEMETRY_DLQ_MAX,
-        log,
-    )
-                    await pipe.execute()
+                pushed, dropped, depth = await dlq_push(r, logs, TELEMETRY_DLQ_MAX)
+                if dropped:
+                    logger.warning(f"DLQ trimmed {dropped} entries to stay within {TELEMETRY_DLQ_MAX}. Depth now {depth}.")
 
                 # Also dump to stdout as emergency fallback
                 await dump_to_stdout(logs)

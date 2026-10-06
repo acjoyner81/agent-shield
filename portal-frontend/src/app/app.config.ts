@@ -1,4 +1,4 @@
-import { ApplicationConfig, provideBrowserGlobalErrorListeners, provideZoneChangeDetection } from '@angular/core';
+import { ApplicationConfig, provideBrowserGlobalErrorListeners, provideZoneChangeDetection, ErrorHandler } from '@angular/core';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideRouter } from '@angular/router';
 import { provideAuth0, authHttpInterceptorFn } from '@auth0/auth0-angular';
@@ -6,6 +6,7 @@ import { provideAuth0, authHttpInterceptorFn } from '@auth0/auth0-angular';
 import { routes } from './app.routes';
 import { environment } from '../environments/environment';
 import { gatewayErrorInterceptor } from './core/interceptors/gateway-error.interceptor';
+import { GlobalErrorHandler } from './core/error-handler/global-error.handler';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -34,5 +35,6 @@ export const appConfig: ApplicationConfig = {
         ]
       }
     }),
+    provideErrorHandler(() => new GlobalErrorHandler()),
   ]
 };

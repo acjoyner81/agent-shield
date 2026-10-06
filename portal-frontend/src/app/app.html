@@ -8,18 +8,15 @@
       <a routerLink="/logs" routerLinkActive="active"><span class="nav-icon">≋</span>Observability <span class="nav-count">Live</span></a>
       <a routerLink="/keys" routerLinkActive="active"><span class="nav-icon">⌘</span>API keys & access</a>
       <p class="nav-label">Platform</p>
-      <a href="javascript:void(0)"><span class="nav-icon">◇</span>Agent runtime</a>
-      <a href="javascript:void(0)"><span class="nav-icon">◌</span>Evaluations</a>
-      <a href="javascript:void(0)"><span class="nav-icon">◒</span>Models & routing</a>
+      <a routerLink="/docs" routerLinkActive="active"><span class="nav-icon">?</span>Help center</a>
+      <a routerLink="/agent" routerLinkActive="active"><span class="nav-icon">◇</span>Agent runtime</a>
+      <a routerLink="/evaluations" routerLinkActive="active"><span class="nav-icon">◌</span>Evaluations</a>
+      <a routerLink="/models" routerLinkActive="active"><span class="nav-icon">◒</span>Models & routing</a>
       <p class="nav-label">Account</p>
       <a routerLink="/pricing" routerLinkActive="active"><span class="nav-icon">◈</span>Plans & billing</a>
-      <a href="javascript:void(0)"><span class="nav-icon">?</span>Help center</a>
     </nav>
     <!--
-      Health is computed from /v1/health/services, never asserted. These two
-      used to be hardcoded "All systems operational" and "Systems normal" with no
-      request behind them, so the shell claimed health on every page while the
-      dashboard computed the real status for the same tenant (Spec 0013).
+      Health is computed from /v1/health/services, never asserted. These used to be hardcoded "All systems operational" and "Systems normal" with no request behind them, so the shell claimed health on every page while the dashboard computed the real status for the same tenant (Spec 0013).
     -->
     <div class="sidebar-footer"><div class="status-line" [class.status-line--stale]="healthStale()"><b></b>{{ healthLabel() }}</div><div class="profile"><span class="profile-avatar">AJ</span><span><strong>{{ auth.userName() }}</strong><small>Workspace owner</small></span><span class="more">•••</span></div></div>
   </aside>
