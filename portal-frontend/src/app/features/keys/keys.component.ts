@@ -2,11 +2,13 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { KeysService, APIKey } from '../../core/services/keys.service';
+import { KeyConfirmationComponent } from '../../core/modals/key-confirmation.component';
+import { KeyCreateComponent } from '../../core/modals/key-create.component';
 
 @Component({
   selector: 'app-keys',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, KeyConfirmationComponent, KeyCreateComponent],
   template: `
     <section class="page-head">
       <div>
@@ -30,9 +32,24 @@ import { KeysService, APIKey } from '../../core/services/keys.service';
       <article class="panel security-card">
         <p class="eyebrow">Workspace roles</p>
         <h2>RBAC policy</h2>
-        <div class="role-row"><span><b class="avatar violet">AJ</b><span><strong>Anthony Joyner</strong><small>Owner · Full access</small></span></span><button class="text-link">Manage</button></div>
-        <div class="role-row"><span><b class="avatar teal-avatar">MO</b><span><strong>Maria Ortiz</strong><small>Operator · Observability</small></span></span><button class="text-link">Manage</button></div>
-        <div class="role-row"><span><b class="avatar yellow-avatar">SC</b><span><strong>Sam Chen</strong><small>Viewer · Read only</small></span></span><button class="text-link">Manage</button></div>
+        <div class="role-item">
+  <b class="avatar violet">AJ</b>
+  <span>Anthony Joyner</span>
+  <small>Owner · Full access</small>
+  <button class="text-link">Manage</button>
+</div>
+<div class="role-item">
+  <b class="avatar teal-avatar">MO</b>
+  <span>Maria Ortiz</span>
+  <small>Operator · Observability</small>
+  <button class="text-link">Manage</button>
+</div>
+<div class="role-item">
+  <b class="avatar yellow-avatar">SC</b>
+  <span>Sam Chen</span>
+  <small>Viewer · Read only</small>
+  <button class="text-link">Manage</button>
+</div>
       </article>
       <article class="panel security-card">
         <p class="eyebrow">Protection status</p>
@@ -61,7 +78,7 @@ import { KeysService, APIKey } from '../../core/services/keys.service';
         <div class="key-row">
           <div><strong>{{ key.name }}</strong><small>{{ key.key_prefix }} · Created {{ key.created_at }}</small></div>
           <span class="key-status">{{ key.status }}</span>
-          <button class="icon-button" title="Revoke Key" (click)="revokeKey(key.key_id)">🗑</button>
+          <button class="icon-button" title="Revoke Key" (click)="openRevokeModal(key.key_id)">🗑</button>
         </div>
       }
       @empty {
@@ -95,38 +112,52 @@ export class KeysComponent implements OnInit {
   readonly keysService = inject(KeysService);
   readonly newlyCreatedSecret = signal<string | null>(null);
 
-  /**
-   * The portal talks to the gateway through its own origin, exactly as
-   * `KeysService` does. nginx forwards `/api/` to the gateway and strips the
-   * prefix, so `/api/docs` and `/api/openapi.json` reach the published contract
-   * in every topology, including a staged one behind TLS termination.
-   */
   readonly gatewayUrl = `${window.location.origin}/api`;
   readonly docsUrl = `${window.location.origin}/api/docs`;
+
+  // Modal state
+  readonly isCreateModalOpen = signal<boolean>(false);
+  readonly isRevokeModalOpen = signal<boolean>(false);
+  readonly revokeKeyId = signal<string>('');
 
   ngOnInit(): void {
     this.keysService.fetchKeys();
   }
 
   openCreateModal(): void {
-    const name = prompt('Enter a name for the new API key (e.g., Staging Gateway):', 'Production App Key');
-    if (name) {
-      this.keysService.createKey(name).subscribe({
-        next: (res) => {
-          if (res.secret_key) {
-            this.newlyCreatedSecret.set(res.secret_key);
-          }
-          this.keysService.fetchKeys();
-        },
-      });
-    }
+    this.isCreateModalOpen.set(true);
   }
 
-  revokeKey(keyId: string): void {
-    if (confirm('Are you sure you want to revoke this API key? This action cannot be undone.')) {
-      this.keysService.revokeKey(keyId).subscribe({
-        next: () => this.keysService.fetchKeys(),
-      });
-    }
+  closeCreateModal(): void {
+    this.isCreateModalOpen.set(false);
+  }
+
+  onCreateKey(name: string): void {
+    this.keysService.createKey(name).subscribe({
+      next: (res) => {
+        if (res.secret_key) {
+          this.newlyCreatedSecret.set(res.secret_key);
+        }
+        this.keysService.fetchKeys();
+        this.closeCreateModal();
+      },
+    });
+  }
+
+  openRevokeModal(keyId: string): void {
+    this.revokeKeyId.set(keyId);
+    this.isRevokeModalOpen.set(true);
+  }
+
+  closeRevokeModal(): void {
+    this.isRevokeModalOpen.set(false);
+    this.revokeKeyId.set('');
+  }
+
+  onRevokeKey(): void {
+    this.keysService.revokeKey(this.revokeKeyId()).subscribe({
+      next: () => this.keysService.fetchKeys(),
+    });
+    this.closeRevokeModal();
   }
 }
