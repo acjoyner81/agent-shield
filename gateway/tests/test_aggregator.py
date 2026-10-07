@@ -51,6 +51,12 @@ async def test_failed_shipment_lands_in_dlq_instead_of_crashing(monkeypatch):
     monkeypatch.setattr(aggregator.redis, "from_url", lambda *a, **k: r)
     monkeypatch.setattr(aggregator, "BATCH_SIZE", 1)
     monkeypatch.setattr(aggregator, "MAX_RETRIES", 1)
+    monkeypatch.setattr(aggregator, "SPLUNK_HEC_TOKEN", "test-collector-token")
+
+    async def ca_ready():
+        return True
+
+    monkeypatch.setattr(aggregator, "wait_for_ca", ca_ready)
 
     async def always_fails(client, logs):
         raise RuntimeError("splunk down")
@@ -81,6 +87,15 @@ async def test_failed_shipment_lands_in_dlq_instead_of_crashing(monkeypatch):
     pending = await r.xpending(aggregator.QUEUE_KEY, aggregator.GROUP_NAME)
     count = pending["pending"] if isinstance(pending, dict) else pending[0]
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_run_aggregator_refuses_to_ship_without_a_ca(monkeypatch):
+    """Verification is never skipped: no configured CA means no process."""
+    monkeypatch.setattr(aggregator, "SPLUNK_HEC_TOKEN", "test-collector-token")
+    monkeypatch.setattr(aggregator, "SPLUNK_HEC_CA", "")
+    with pytest.raises(SystemExit):
+        await aggregator.run_aggregator()
 
 
 async def _noop(batch):

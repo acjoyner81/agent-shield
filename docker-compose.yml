@@ -42,12 +42,22 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-http://localhost:4200/billing/success}
       STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:-http://localhost:4200/billing/cancel}
+      # The health probe posts here to decide whether shipping works. Verification
+      # is never disabled, so the CA has to be reachable, but a missing file
+      # reports degraded with a reason rather than refusing to boot the gateway.
+      SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-https://splunk:8088/services/collector/event}
+      SPLUNK_HEC_CA: /etc/agentshield/splunk-ca/ca.crt
+      SPLUNK_HEALTH_MAX_SHIP_AGE_SEC: ${SPLUNK_HEALTH_MAX_SHIP_AGE_SEC:-300}
     volumes:
       # Tripwire publishes its integrity verdict on tripwire-data, and the
       # service health surface reports it. Read only, and tripwire-data holds
       # only the baseline database and reports: the encryption keys live in the
       # separate tripwire-keys volume, which is deliberately not shared.
       - tripwire-data:/var/lib/tripwire:ro
+      # The collector's public certificate authority, and only that. The signing
+      # key stays inside the Splunk container, so this mount hands the gateway a
+      # trust anchor and no way to mint a certificate with it.
+      - splunk-ca:/etc/agentshield/splunk-ca:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -67,13 +77,45 @@ services:
     image: splunk/splunk:latest
     platform: linux/amd64
     container_name: agentshield-splunk
+    entrypoint: ["/bin/bash", "/sbin/entrypoint-wrapper.sh"]
+    command: ["start-service"]
     environment:
       SPLUNK_START_ARGS: --accept-license
       SPLUNK_GENERAL_TERMS: --accept-sgt-current-at-splunk-com
+      # Both mandatory. These are real credentials: the file that used to hold
+      # them committed, splunk/default.yml, is gone because the image never read
+      # it. The collector token travels in an Authorization header on every batch,
+      # so it stays out of every configuration file and every log.
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:?Set SPLUNK_PASSWORD in .env}
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:?Set SPLUNK_HEC_TOKEN in .env}
+      # Optional, and defaults to SPLUNK_PASSWORD. Only set it when you want the
+      # collector's private key passphrase to differ from the admin credential.
+      SPLUNK_HEC_CERT_PASSWORD: ${SPLUNK_HEC_CERT_PASSWORD:-}
     ports:
       - "8001:8000"
       - "8088:8088"
+    volumes:
+      # Configuration and the generated keys, and indexes plus stored events. Both
+      # are required so a recreate does not silently reissue the certificate
+      # authority or delete every event the moment shipping starts working.
+      - splunk-etc:/opt/splunk/etc
+      - splunk-var:/opt/splunk/var
+      # Holds one public file, ca.crt. Deliberately not a mount of /opt/splunk/etc,
+      # because that directory holds Splunk's private keys and handing those to two
+      # other services would defeat the point of sharing the authority.
+      - splunk-ca:/opt/splunk/ca-share
+      - ./splunk/entrypoint-wrapper.sh:/sbin/entrypoint-wrapper.sh:ro
+    healthcheck:
+      # Verified against the published authority rather than -k. The certificate
+      # carries localhost in its subject alternative names precisely so this check
+      # can be as strict as the clients' checks.
+      test: ["CMD", "curl", "--cacert", "/opt/splunk/ca-share/ca.crt", "-s", "-f", "https://localhost:8088/services/collector/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      # Splunk's own bootstrap takes minutes on a fresh volume, and the wrapper
+      # issues the certificate before it starts.
+      start_period: 180s
     depends_on:
       redis:
         condition: service_healthy
@@ -86,13 +128,26 @@ services:
     container_name: agentshield-telemetry-aggregator
     environment:
       REDIS_URL: redis://redis:6379/0
-      SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-http://splunk:8088/services/collector/raw}
+      # https, not http: the collector only answers on TLS, so the http:// default
+      # this replaced reset on every attempt and shipped nothing, silently.
+      SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-https://splunk:8088/services/collector/event}
       SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:?Set SPLUNK_HEC_TOKEN in .env}
+      SPLUNK_HEC_CA: /etc/agentshield/splunk-ca/ca.crt
+      # Splunk's bootstrap runs for minutes on a fresh volume. Waiting for the
+      # authority behind the compose health gate is the difference between a slow
+      # start and a crash loop, so the wait is bounded and explicit.
+      SPLUNK_HEC_CA_WAIT_SEC: ${SPLUNK_HEC_CA_WAIT_SEC:-300}
+      SPLUNK_HEC_INDEX: ${SPLUNK_HEC_INDEX:-main}
+      SPLUNK_HEC_SOURCETYPE: ${SPLUNK_HEC_SOURCETYPE:-agentshield:telemetry}
+      TELEMETRY_DLQ_MAX: ${TELEMETRY_DLQ_MAX:-10000}
+    volumes:
+      # One public certificate, read only. No signing key is mounted here.
+      - splunk-ca:/etc/agentshield/splunk-ca:ro
     depends_on:
       redis:
         condition: service_healthy
       splunk:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
   portal-frontend:
@@ -149,3 +204,6 @@ volumes:
   redis-data:
   tripwire-data:
   tripwire-keys:
+  splunk-etc:
+  splunk-var:
+  splunk-ca:
