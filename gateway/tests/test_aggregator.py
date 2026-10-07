@@ -5,6 +5,8 @@ did not exist anywhere in the module, so a Splunk outage crashed the aggregator
 with NameError instead of dead-lettering the batch. The suite drives the real
 `run_aggregator` failure path against fakeredis, not just the helper.
 """
+import json
+
 import fakeredis
 import pytest
 
@@ -100,3 +102,107 @@ async def test_run_aggregator_refuses_to_ship_without_a_ca(monkeypatch):
 
 async def _noop(batch):
     return None
+
+
+class _CollectorResponse:
+    """A HEC answer: HTTP 200, with the real verdict in the body."""
+
+    def __init__(self, body):
+        self.status_code = 200
+        self._body = body
+
+    def json(self):
+        return self._body
+
+    @property
+    def text(self):
+        return json.dumps(self._body)
+
+    def raise_for_status(self):
+        return None
+
+
+class _CollectorClient:
+    """The client surface `ship_to_splunk` touches, answering as scripted."""
+
+    def __init__(self, body):
+        self._body = body
+
+    async def post(self, *args, **kwargs):
+        return _CollectorResponse(self._body)
+
+
+@pytest.mark.asyncio
+async def test_ship_to_splunk_raises_when_the_body_reports_a_nonzero_code():
+    """AC-12: HTTP 200 is not success; the collector's own body code is."""
+    with pytest.raises(aggregator.ShipRejected, match="code=3"):
+        await aggregator.ship_to_splunk(
+            _CollectorClient({"code": 3, "text": "No data"}), ["{}"]
+        )
+
+    # code 0 is the collector accepting the batch.
+    await aggregator.ship_to_splunk(
+        _CollectorClient({"code": 0, "text": "Success"}), ["{}"]
+    )
+
+
+async def _claimed_batch(r, payload):
+    """One enqueued entry, claimed by the consumer, ready to ship."""
+    await aggregator.ensure_consumer_group(r)
+    await r.xadd(aggregator.QUEUE_KEY, {"payload": payload})
+    entries = await r.xreadgroup(
+        aggregator.GROUP_NAME,
+        aggregator.CONSUMER_NAME,
+        {aggregator.QUEUE_KEY: ">"},
+        count=1,
+    )
+    message_id, fields = entries[0][1][0]
+    return [(message_id, fields["payload"])]
+
+
+def _pending_count(pending):
+    return pending["pending"] if isinstance(pending, dict) else pending[0]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_batch_dead_letters_and_never_reads_as_shipped(monkeypatch):
+    """AC-12: a refusal reaches the dead letter queue, and the stream entry is
+    acked only once its copy is safe there, never one instead of the other."""
+    r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(aggregator, "dump_to_stdout", _noop)
+    payload = '{"level":"INFO","message":"rejected by the collector"}'
+    batch = await _claimed_batch(r, payload)
+
+    await aggregator.ship_batch(
+        _CollectorClient({"code": 3, "text": "No data"}), r, batch
+    )
+
+    assert await r.lrange(aggregator.DLQ_KEY, 0, -1) == [payload]
+    pending = await r.xpending(aggregator.QUEUE_KEY, aggregator.GROUP_NAME)
+    assert _pending_count(pending) == 0  # the DLQ copy is the only copy
+    receipts = await r.hgetall(aggregator.SHIP_KEY)
+    assert receipts["consecutive_failures"] == "1"
+    assert "ShipRejected" in receipts["last_error"]
+    assert "code=3" in receipts["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_batch_ships_without_touching_the_dead_letter_queue(monkeypatch):
+    """AC-12's other half: code 0 acks the entry, writes no dead letter copy,
+    and clears the receipts so an old reason cannot linger."""
+    r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(aggregator, "dump_to_stdout", _noop)
+    payload = '{"level":"INFO","message":"accepted by the collector"}'
+    await r.hset(aggregator.SHIP_KEY, mapping={"last_error": "stale", "consecutive_failures": "4"})
+    batch = await _claimed_batch(r, payload)
+
+    await aggregator.ship_batch(
+        _CollectorClient({"code": 0, "text": "Success"}), r, batch
+    )
+
+    assert await r.llen(aggregator.DLQ_KEY) == 0
+    pending = await r.xpending(aggregator.QUEUE_KEY, aggregator.GROUP_NAME)
+    assert _pending_count(pending) == 0
+    receipts = await r.hgetall(aggregator.SHIP_KEY)
+    assert receipts["consecutive_failures"] == "0"
+    assert receipts["last_error"] == ""

@@ -85,7 +85,7 @@ Make events actually arrive in Splunk, make the setup reproducible from the repo
    - [x] Cap the dead letter queue and count drops in one atomic script on a single push end (AC-8, AC-10)
    - [x] Add the health entry, the `telemetry:admin` scope, atomic redrive, and drain the stranded events (AC-7, AC-8, AC-9)
 - [ ] Verify it: `/check verify land telemetry in splunk`
-- [ ] Test it: `/test land telemetry in splunk`
+- [x] Test it: `/test land telemetry in splunk` — 9 tests added 2026-10-07: AC-10 replay boundaries (happy, limit, interrupted before and after the move) and the redrive gate (403 scope, 401 missing token) in `gateway/tests/test_telemetry_landing.py`, AC-12 collector verdict chain (ShipRejected dead letters instead of acking, code 0 ships clean) in `gateway/tests/test_aggregator.py`.
 Spec 0014 · `docs/specs/0014-land-telemetry-in-splunk/index.md` · code in `docker-compose.yml`, `gateway/aggregator.py`, `gateway/main.py`, `gateway/metering.py`
 
 ## Slice 2: Identity & Access
