@@ -115,6 +115,28 @@ describe('gatewayErrorInterceptor', () => {
       expect(notifications.isStale('usage')).toBe(false);
     });
 
+    it('maps the bare keys path to the keys widget', () => {
+      // The list is `/api/v1/keys` with no trailing segment, so a map written
+      // with trailing slashes like the others misses it and the list keeps its
+      // previous keys with nothing saying they are old.
+      http.get('/api/v1/keys', { context: SILENT_POLL }).subscribe({ error: () => undefined });
+      httpMock.expectOne('/api/v1/keys').flush(null, { status: 500, statusText: 'Server Error' });
+
+      expect(notifications.isStale('keys')).toBe(true);
+    });
+
+    it('treats a revoke as the same widget, since it redraws the same list', () => {
+      // A revoke is a click, so a refused one toasts rather than going quiet. What
+      // the mapping buys is on the success path: the revoke reloads the list, so
+      // it has to clear the keys widget's stale flag with it.
+      notifications.markStale('keys');
+
+      http.delete('/api/v1/keys/key_abc', { context: USER_ACTION }).subscribe();
+      httpMock.expectOne('/api/v1/keys/key_abc').flush(null, { status: 204, statusText: 'No Content' });
+
+      expect(notifications.isStale('keys')).toBe(false);
+    });
+
     it('shows a banner for a user initiated click on the same 429', () => {
       http.post('/api/v1/keys', { name: 'Staging' }, { context: USER_ACTION }).subscribe({ error: () => undefined });
       httpMock
@@ -165,6 +187,18 @@ describe('gatewayErrorInterceptor', () => {
 
       expect(notifications.isStale('usage')).toBe(false);
       expect(notifications.lastUpdatedAt('usage')).not.toBeNull();
+    });
+
+    it('takes the keys list back out of the stale state', () => {
+      http.get('/api/v1/keys', { context: SILENT_POLL }).subscribe({ error: () => undefined });
+      httpMock.expectOne('/api/v1/keys').flush(null, { status: 500, statusText: 'Server Error' });
+      expect(notifications.isStale('keys')).toBe(true);
+
+      http.get('/api/v1/keys', { context: SILENT_POLL }).subscribe();
+      httpMock.expectOne('/api/v1/keys').flush([]);
+
+      expect(notifications.isStale('keys')).toBe(false);
+      expect(notifications.staleNote('keys')).toBeNull();
     });
   });
 

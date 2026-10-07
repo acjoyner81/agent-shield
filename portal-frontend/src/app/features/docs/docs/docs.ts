@@ -9,4 +9,4 @@ import { Component, OnInit, ViewEncapsulation } from '@angular/core';
 })
 export class Docs implements OnInit {
   ngOnInit(): void {}
-})
+}

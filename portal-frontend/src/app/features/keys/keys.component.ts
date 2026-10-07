@@ -1,9 +1,10 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { KeysService, APIKey } from '../../core/services/keys.service';
 import { KeyConfirmationComponent } from '../../core/modals/key-confirmation.component';
 import { KeyCreateComponent } from '../../core/modals/key-create.component';
+import { NotificationService } from '../../core/errors/error-state.service';
 
 @Component({
   selector: 'app-keys',
@@ -72,7 +73,12 @@ import { KeyCreateComponent } from '../../core/modals/key-create.component';
           <p class="eyebrow">Credentials</p>
           <h2>Active API keys</h2>
         </div>
-        <span class="small-note">Rotate keys every 90 days</span>
+        <span class="small-note">
+          Rotate keys every 90 days
+          @if (keysNote(); as note) {
+            <em class="stale-note"> · {{ note }}</em>
+          }
+        </span>
       </div>
       @for (key of keysService.keys(); track key.key_id) {
         <div class="key-row">
@@ -111,6 +117,15 @@ import { KeyCreateComponent } from '../../core/modals/key-create.component';
 export class KeysComponent implements OnInit {
   readonly keysService = inject(KeysService);
   readonly newlyCreatedSecret = signal<string | null>(null);
+  private readonly notifications = inject(NotificationService);
+
+  /**
+   * A failed key list load keeps the keys on screen and marks them old, so the
+   * list has to say so too. A revoked key still shown next to "Rotate keys
+   * every 90 days" reads as live, and a stale list on a credentials page is a
+   * security question, not a cosmetic one.
+   */
+  readonly keysNote = computed(() => this.notifications.staleNote('keys'));
 
   readonly gatewayUrl = `${window.location.origin}/api`;
   readonly docsUrl = `${window.location.origin}/api/docs`;

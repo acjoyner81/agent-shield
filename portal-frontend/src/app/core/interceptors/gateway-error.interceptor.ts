@@ -35,6 +35,9 @@ const WIDGET_BY_PATH: ReadonlyArray<readonly [string, StaleWidget]> = [
   ['/api/v1/usage/', 'usage'],
   ['/api/v1/health/', 'health'],
   ['/api/v1/telemetry/', 'logs'],
+  // No trailing slash: the key list is the bare path, and a revoke is a child of
+  // it. Both are the same widget, because both redraw the same list.
+  ['/api/v1/keys', 'keys'],
 ];
 
 function widgetFor(url: string): StaleWidget | undefined {

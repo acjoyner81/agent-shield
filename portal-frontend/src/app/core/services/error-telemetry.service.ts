@@ -1,6 +1,5 @@
-import { Injectable, Injector } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { ErrorStateService } from '../core/errors/error-state.service';
 import { take, tap } from 'rxjs/operators';
 
 @Injectable({ providedIn: 'root' })
@@ -15,15 +14,9 @@ export class ErrorTelemetryService {
   private dedupeMap = new Map<string, number>();
 
   constructor(
-    private http: HttpClient,
-    private injector: Injector
+    private http: HttpClient
   ) {
-    this.errorStateService = this.injector.get(ErrorStateService);
     this.startFlushInterval();
-  }
-
-  private get errorStateService() {
-    return this.injector.get(ErrorStateService);
   }
 
   private startFlushInterval() {

@@ -35,6 +35,6 @@ export const appConfig: ApplicationConfig = {
         ]
       }
     }),
-    provideErrorHandler(() => new GlobalErrorHandler()),
+    { provide: ErrorHandler, useClass: GlobalErrorHandler },
   ]
 };

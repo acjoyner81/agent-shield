@@ -1,7 +1,8 @@
-import { Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { TelemetryService } from '../../core/services/telemetry.service';
+import { NotificationService } from '../../core/errors/error-state.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -13,6 +14,9 @@ import { TelemetryService } from '../../core/services/telemetry.service';
         <p class="eyebrow">Control plane / overview</p>
         <h1>Good morning, Anthony.</h1>
         <p class="subhead">Your AI operations are steady. Here is the signal that matters today.</p>
+        @if (usageNote(); as note) {
+          <p class="stale-note">{{ note }}</p>
+        }
       </div>
       <div class="head-actions">
         <button class="button button-secondary" type="button" (click)="telemetry.refreshDashboard()">
@@ -96,6 +100,9 @@ import { TelemetryService } from '../../core/services/telemetry.service';
             <h2>System health</h2>
           </div>
           <span class="live-pill"><b></b> Live</span>
+          @if (healthNote(); as note) {
+            <span class="stale-note">{{ note }}</span>
+          }
         </div>
         <div class="health-list">
           @for (service of telemetry.health()?.services ?? []; track service.name) {
@@ -172,6 +179,19 @@ import { TelemetryService } from '../../core/services/telemetry.service';
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   readonly telemetry = inject(TelemetryService);
+  private readonly notifications = inject(NotificationService);
+
+  /**
+   * The quiet staleness notes for the two widgets on this page.
+   *
+   * Both are silent polls, so a failure marks them stale instead of interrupting,
+   * and the last known figures stay on screen. That only works if something says
+   * they are old: the shell says so for health, but the usage figures and this
+   * page's own health panel had no marker, which is the state the spec is about,
+   * a screen that looks current while its numbers are not.
+   */
+  readonly usageNote = computed(() => this.notifications.staleNote('usage'));
+  readonly healthNote = computed(() => this.notifications.staleNote('health'));
 
   ngOnInit(): void {
     this.telemetry.fetchRecentLogs();

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, effect, inject, untracked } from '@angular/core';
-import { NotificationService, StaleWidget } from '../../core/errors/error-state.service';
+import { NotificationService } from '../../core/errors/error-state.service';
 import { AuthService } from '../../core/services/auth.service';
 
 /**
@@ -22,8 +22,33 @@ import { AuthService } from '../../core/services/auth.service';
   selector: 'app-notification-center',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <!-- Polite region: announced without interrupting whatever the user is doing. -->
     <div class="notice-region" role="status" aria-live="polite">
+      <!--
+        A session the gateway will not accept. It lives inside the polite region
+        so it stacks with the rest instead of landing on top of the budget
+        banner, which claims the top centre, and it stays until a request
+        succeeds because the automatic redirect is only ever spent once. A user
+        left with no explanation and no way forward is worse off than one who is
+        told.
+
+        role="alert" on the notice itself: it is the one state that needs action
+        now, and the deadline is the tenant's work, not the session's.
+      -->
+      @if (notifications.sessionNotice(); as session) {
+        <div class="notice notice--session" role="alert">
+          <span class="notice__label">Session expired</span>
+          <span class="notice__body">{{ session.message }}</span>
+          <button
+            type="button"
+            class="notice__dismiss"
+            (click)="signInAgain()"
+            aria-label="Sign in again"
+          >
+            Sign in again
+          </button>
+        </div>
+      }
+
       @if (notifications.rateLimit(); as rateLimit) {
         <div class="notice notice--warn">
           <span class="notice__label">Throttled</span>
@@ -42,7 +67,7 @@ import { AuthService } from '../../core/services/auth.service';
           <button
             type="button"
             class="notice__dismiss"
-            (click)="notifications.reportSuccess()"
+            (click)="notifications.dismissRateLimit()"
             aria-label="Dismiss rate limit notice"
           >
             Dismiss
@@ -66,7 +91,7 @@ import { AuthService } from '../../core/services/auth.service';
       }
     </div>
 
-    <!-- Assertive: the budget is gone and the user has to act on it. -->
+    <!-- Assertive and on its own: the budget is gone and the user has to act. -->
     @if (notifications.budgetBanner(); as budget) {
       <div class="notice notice--danger" role="alert">
         <span class="notice__label">Budget exhausted</span>
@@ -114,6 +139,12 @@ import { AuthService } from '../../core/services/auth.service';
         left: 50%;
         transform: translateX(-50%);
         z-index: 1001;
+        border-color: #dc2626;
+      }
+
+      /* Same alarm colour as the budget, without the fixed placement: this one
+         stacks inside the region so the two never overlap. */
+      .notice--session {
         border-color: #dc2626;
       }
 
@@ -176,10 +207,13 @@ export class NotificationCenter {
    */
   private redirectSent = false;
 
+  /** Gateway successes at the moment the redirect went out, so we can spot the next one. */
+  private successesAtRedirect = 0;
+
   constructor() {
     // The 401 consequence, and the only place in the app that acts on it.
     //
-    // `ErrorStateService.report` sets `sessionExpired` for a 401 and exempts that
+    // `NotificationService.report` sets `sessionExpired` for a 401 and exempts that
     // kind from silent suppression, but it is a pure signal store: it holds state
     // and never navigates. Nothing else read this signal, so a dead session
     // produced neither a redirect nor an explanation, and the specs missed it
@@ -189,41 +223,56 @@ export class NotificationCenter {
     // and simply lacks the scope, so sending the user through Auth0 again lands
     // them back here with the same refusal, which is the loop Spec 0013 forbids.
     //
-    // The flag is acknowledged BEFORE navigating, not after, which inverts the
-    // previous design. Acknowledging afterwards meant the only thing that could
-    // clear the flag was a live session, and `authenticated` reads
-    // `isAuthenticated$` -- permanently false for a real Auth0 token, because it
-    // asks for a `user` claim the token does not carry. So the flag stayed true
-    // forever, this effect re-fired `login()` forever, and on a full page load
-    // the renderer wedged in unbounded recursion at 100% CPU.
-    //
-    // `redirectSent` covers the case acknowledging cannot: concurrent 401s from
-    // a poll landing between the acknowledge and the navigation completing.
-    // It is dropped once a session is genuinely live so a later, real expiry
-    // still redirects.
+    // The flag is acknowledged BEFORE navigating, not after, so a 401 arriving
+    // between the acknowledge and the navigation completing cannot start a
+    // second redirect. `redirectSent` covers the remaining case: two 401s in the
+    // same tick, which the acknowledge alone cannot serialise.
     effect(() => {
       if (!this.notifications.sessionExpired() || this.redirectSent) {
         return;
       }
       this.redirectSent = true;
+      this.successesAtRedirect = this.notifications.acceptedResponses();
       // Inside untracked so the write does not re-trigger this effect; the flag
       // is cleared in the same tick the redirect is issued.
       untracked(() => this.notifications.acknowledgeSessionExpiry());
       this.auth.login();
     });
 
-    // Drop the latch on a live session, so a genuine second expiry can redirect
-    // again. Reading `authenticated` is safe here: it is not written by this
-    // effect, and `untracked` keeps the latch write out of the dependency set.
+    // Re-arm the latch only on proof that the gateway accepted the session.
+    //
+    // This used to read `auth.authenticated`, which is the Auth0 SDK's own
+    // session flag. That flag answers "do I hold a structurally valid token",
+    // not "will the gateway accept it", so a token minted with the wrong
+    // audience, a revoked user, or any other audience or issuer mismatch looked
+    // exactly like a recovered session: the latch dropped, the next 401
+    // redirected, the rejected token was replaced by another rejected token.
+    // Measured in the browser at 261 token exchanges and 1018 refused calls in
+    // about eight seconds, hammering Auth0's token endpoint.
+    //
+    // A 2xx from the gateway is the only evidence that answers the question that
+    // actually matters, and it is already counted for exactly this purpose. The
+    // cost is that a session which expires again while no request succeeds gets
+    // no second automatic redirect: the notice stays up instead, with a sign in
+    // control the user can press, which cannot become a storm.
     effect(() => {
-      if (!this.auth.authenticated()) {
+      const accepted = this.notifications.acceptedResponses();
+      if (!this.redirectSent || accepted === this.successesAtRedirect) {
         return;
       }
       untracked(() => {
         this.redirectSent = false;
-        this.notifications.acknowledgeSessionExpiry();
       });
     });
+  }
+
+  /**
+   * A user pressed retry, which is not a loop: somebody has to be present to
+   * press it. The latch stays as it is, so this cannot compound with the 401s
+   * arriving in the meantime.
+   */
+  protected signInAgain(): void {
+    this.auth.login();
   }
 
   /**
@@ -240,10 +289,5 @@ export class NotificationCenter {
       default:
         return 'Gateway error';
     }
-  }
-
-  /** Exposed for the shell's health line and for tests. */
-  widgetIsStale(widget: StaleWidget): boolean {
-    return this.notifications.isStale(widget);
   }
 }

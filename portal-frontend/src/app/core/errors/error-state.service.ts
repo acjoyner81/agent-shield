@@ -12,7 +12,7 @@ import { GatewayError } from '../errors/gateway-error';
  * way in `TelemetryService`, and there is no cross cutting library to justify.
  */
 
-export type StaleWidget = 'usage' | 'health' | 'logs';
+export type StaleWidget = 'usage' | 'health' | 'logs' | 'keys';
 
 /** A live countdown, so the banner can render "retrying in 9s" without polling. */
 export interface RateLimitState {
@@ -52,18 +52,47 @@ export class NotificationService implements OnDestroy {
 
   readonly toast = signal<GatewayError | null>(null);
 
-  /** One-shot guard so a burst of 401s cannot start a redirect storm. */
+  /** One-shot trigger the container turns into exactly one redirect. */
   readonly sessionExpired = signal(false);
+
+  /**
+   * The visible half of a session expiry, or null.
+   *
+   * Separate from the trigger above because the two have different lifetimes.
+   * The trigger is spent by the redirect, which happens once. The notice has to
+   * survive until something proves the session works again, otherwise a user
+   * whose re-minted token the gateway still refuses is left with no explanation
+   * at all: every request 401s, no banner says why, and the bounded redirect
+   * looks like the app having decided to ignore them.
+   */
+  readonly sessionNotice = signal<GatewayError | null>(null);
+
+  /**
+   * Counts gateway 2xx responses, which is the only evidence available that the
+   * gateway accepts the session the portal is holding.
+   *
+   * It exists because the Auth0 SDK reports itself authenticated while holding
+   * any structurally valid token, including one the gateway refuses, so its
+   * session flag cannot tell a working token from a rejected one. The container
+   * needs that distinction to decide whether a second redirect is warranted.
+   */
+  private readonly gatewaySuccesses = signal(0);
+  readonly acceptedResponses = this.gatewaySuccesses.asReadonly();
 
   private readonly staleness = signal<Record<StaleWidget, WidgetStaleness>>({
     usage: { lastUpdatedAt: null, stale: false },
     health: { lastUpdatedAt: null, stale: false },
     logs: { lastUpdatedAt: null, stale: false },
+    keys: { lastUpdatedAt: null, stale: false },
   });
 
   /** Everything the container renders, derived once. */
   readonly hasAnyNotice = computed(
-    () => this.budgetBanner() !== null || this.rateLimit() !== null || this.toast() !== null,
+    () =>
+      this.budgetBanner() !== null ||
+      this.rateLimit() !== null ||
+      this.toast() !== null ||
+      this.sessionNotice() !== null,
   );
 
   /** Per widget. Reads keep the last known figures; they only add a quiet note. */
@@ -106,6 +135,7 @@ export class NotificationService implements OnDestroy {
         return;
       case 'session_expired':
         this.sessionExpired.set(true);
+        this.sessionNotice.set(error);
         return;
       case 'scope_denied':
       case 'guardrail_blocked':
@@ -121,8 +151,14 @@ export class NotificationService implements OnDestroy {
    * Waiting out the full `Retry-After` instead would leave a banner claiming the
    * tenant is throttled while their requests already succeed, which is the kind
    * of false statement this layer exists to stop.
+   *
+   * It is also the only proof that the gateway accepts the current session, so
+   * it clears the session notice and is what lets the container spend another
+   * redirect on a later, genuinely new expiry.
    */
   reportSuccess(): void {
+    this.gatewaySuccesses.update((count) => count + 1);
+    this.sessionNotice.set(null);
     this.clearRateLimit();
   }
 
@@ -136,6 +172,15 @@ export class NotificationService implements OnDestroy {
   dismissToast(): void {
     this.clearToastTimer();
     this.toast.set(null);
+  }
+
+  /**
+   * The user saying "I have read this", which is not the same claim as a
+   * successful response. Kept separate from `reportSuccess` so a dismiss click
+   * cannot pass for gateway evidence that the session works.
+   */
+  dismissRateLimit(): void {
+    this.clearRateLimit();
   }
 
   acknowledgeSessionExpiry(): void {
@@ -165,6 +210,18 @@ export class NotificationService implements OnDestroy {
     const seconds = Math.max(0, Math.round((now - lastUpdatedAt) / 1000));
     const label = seconds < 60 ? `${seconds}s ago` : `${Math.round(seconds / 60)}m ago`;
     return stale ? `last updated ${label}` : label;
+  }
+
+  /**
+   * The note only while the widget is stale.
+   *
+   * For chrome that should stay quiet when the data is fresh. A poll running
+   * every 60 seconds would otherwise rewrite "3s ago" on the page twice a minute
+   * to tell the user nothing, and the note exists to say the figures on screen
+   * are old, not to report the passing of time.
+   */
+  staleNote(widget: StaleWidget): string | null {
+    return this.isStale(widget) ? this.relativeLastUpdated(widget) : null;
   }
 
   private setRateLimit(error: GatewayError): void {

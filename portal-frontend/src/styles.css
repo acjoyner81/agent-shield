@@ -24,3 +24,10 @@
    squeezed between the service name and its status. */
 .health-list > div { flex-wrap:wrap; }
 .health-detail { flex-basis:100%; margin:7px 0 0 15px; color:var(--coral); font:10px 'DM Mono',monospace; line-height:1.5; }
+
+/* The quiet staleness note. A failed silent poll keeps the last known figures
+   on screen, so something has to say they are old. Low contrast on purpose: it
+   is a footnote on the data, not an interruption, and the wording carries the
+   state rather than the colour. */
+.stale-note { margin-top:8px; color:#9aa8ae; font:10px 'DM Mono',monospace; font-style:normal; }
+.stale-note em { font-style:normal; }

@@ -335,11 +335,111 @@ describe('NotificationCenter', () => {
       fixture.detectChanges();
       expect(auth.login).toHaveBeenCalledTimes(1);
 
-      // A real session comes back, which drops the latch.
+      // A real session comes back, which drops the latch. The gateway answering
+      // 2xx is the evidence; the SDK's own session flag is not, because it is
+      // happy with any structurally valid token.
       authenticated.set(true);
+      service.reportSuccess();
       fixture.detectChanges();
 
       service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      fixture.detectChanges();
+
+      expect(auth.login).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  /**
+   * The loop the runtime verification measured: 261 token exchanges in 8 seconds.
+   *
+   * The Auth0 SDK reports itself authenticated while holding any structurally
+   * valid token, including one the gateway refuses, so a re-minted token looked
+   * like a recovered session and the redirect latch re-armed itself. Nothing
+   * about "the SDK has a token" says "the gateway accepts it".
+   */
+  describe('when Auth0 keeps minting tokens the gateway refuses', () => {
+    let authenticated: ReturnType<typeof signal<boolean>>;
+
+    beforeEach(async () => {
+      authenticated = signal(false);
+      auth.authenticated = () => authenticated();
+      // The redirect lands, the SDK holds the new token, and it is still refused.
+      // No gateway call ever succeeds, which is the whole condition.
+      auth.login.and.callFake(() => authenticated.set(true));
+
+      fixture = TestBed.createComponent(NotificationCenter);
+      service = TestBed.inject(NotificationService);
+      fixture.detectChanges();
+    });
+
+    function rejectSession(): void {
+      authenticated.set(false);
+      service.report(
+        gatewayError({
+          kind: 'session_expired',
+          status: 401,
+          // The wording the classifier actually produces for a 401, so this
+          // asserts what a user would read rather than a fixture's own phrase.
+          message: 'Your session expired. Signing you back in.',
+        }),
+        'silent',
+      );
+      fixture.detectChanges();
+    }
+
+    it('redirects once, not once per refused token', () => {
+      for (let i = 0; i < 5; i++) {
+        rejectSession();
+      }
+
+      expect(auth.login).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not treat a token the gateway refused as a recovered session', () => {
+      rejectSession();
+      authenticated.set(true);
+      fixture.detectChanges();
+
+      expect(auth.login).toHaveBeenCalledTimes(1);
+    });
+
+    it('tells the user the session is still refused, rather than failing silently', () => {
+      // Bounding the loop is only half the fix. Without a notice, the user is
+      // stranded on a session the gateway will not accept and nothing on
+      // screen says so.
+      rejectSession();
+      fixture.detectChanges();
+
+      expect(text()).toContain('Session expired');
+      expect(text()).toContain('Your session expired');
+    });
+
+    it('announces it assertively, and stacks it rather than covering the budget', () => {
+      rejectSession();
+      fixture.detectChanges();
+
+      const notice = (fixture.nativeElement as HTMLElement).querySelector('.notice--session');
+      expect(notice!.getAttribute('role')).toBe('alert');
+      // Inside the region, because the budget banner is fixed at the top centre
+      // and two fixed notices in the same place is one notice nobody can read.
+      expect((fixture.nativeElement as HTMLElement).querySelector('.notice-region .notice--session')).not.toBeNull();
+    });
+
+    it('clears that notice on the first gateway success', () => {
+      rejectSession();
+      service.reportSuccess();
+      fixture.detectChanges();
+
+      expect(text()).not.toContain('Session expired');
+    });
+
+    it('lets the user retry sign in deliberately', () => {
+      // A user driven retry cannot become a storm, because a user has to be
+      // there to click it.
+      rejectSession();
+      const retry = dismissButtons()[0];
+      expect(retry.textContent).toContain('Sign in again');
+      retry.click();
       fixture.detectChanges();
 
       expect(auth.login).toHaveBeenCalledTimes(2);

@@ -10,6 +10,7 @@ import {
   TelemetryService,
   UsageSummary,
 } from '../../core/services/telemetry.service';
+import { NotificationService } from '../../core/errors/error-state.service';
 
 const USAGE_ADMIN: UsageSummary = {
   tenant_id: 'tenant_alpha',
@@ -282,5 +283,69 @@ describe('Dashboard refresh contract (Spec 0011 AC-5, AC-6)', () => {
     httpMock.expectOne('/api/v1/health/services').flush(HEALTH);
 
     expect(service.usage()).toEqual(USAGE_ADMIN);
+  });
+
+  /**
+   * The staleness notes, which the runtime verification found missing.
+   *
+   * Keeping the last known figures is only honest if something says they are
+   * old. The shell says so for health, but these two widgets had a stale flag
+   * tracked in the store and no marker bound to it, so the page read as current
+   * while showing numbers from a poll that had stopped succeeding.
+   *
+   * Driven through the store rather than a failed request, because these specs
+   * run without the interceptor; the interceptor's own mapping is asserted in
+   * `gateway-error.interceptor.spec.ts`.
+   */
+  describe('staleness notes', () => {
+    let notifications: NotificationService;
+
+    beforeEach(() => {
+      notifications = TestBed.inject(NotificationService);
+    });
+
+    afterEach(() => notifications.ngOnDestroy());
+
+    function staleNoteTexts(root: HTMLElement): string[] {
+      return [...root.querySelectorAll('.stale-note')].map((el) => el.textContent ?? '');
+    }
+
+    it('says the usage figures are old once the usage poll stops succeeding', () => {
+      const fixture = TestBed.createComponent(DashboardComponent);
+      fixture.detectChanges();
+      flushInit(USAGE_ADMIN);
+
+      notifications.markFresh('usage');
+      notifications.markStale('usage');
+      fixture.detectChanges();
+
+      const root = fixture.nativeElement as HTMLElement;
+      expect(staleNoteTexts(root).join(' ')).toContain('last updated');
+    });
+
+    it('says the health list is old too, not just the shell pill', () => {
+      const fixture = TestBed.createComponent(DashboardComponent);
+      fixture.detectChanges();
+      flushInit(USAGE_ADMIN);
+
+      notifications.markFresh('health');
+      notifications.markStale('health');
+      fixture.detectChanges();
+
+      const panel = (fixture.nativeElement as HTMLElement).querySelector('.activity-panel');
+      expect(panel?.querySelector('.stale-note')?.textContent).toContain('last updated');
+    });
+
+    it('says nothing while the data is fresh', () => {
+      const fixture = TestBed.createComponent(DashboardComponent);
+      fixture.detectChanges();
+      flushInit(USAGE_ADMIN);
+
+      notifications.markFresh('usage');
+      notifications.markFresh('health');
+      fixture.detectChanges();
+
+      expect((fixture.nativeElement as HTMLElement).querySelector('.stale-note')).toBeNull();
+    });
   });
 });

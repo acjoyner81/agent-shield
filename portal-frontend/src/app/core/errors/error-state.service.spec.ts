@@ -234,6 +234,95 @@ describe('NotificationService', () => {
     it('renders nothing rather than a bare label when there is no timestamp yet', () => {
       expect(service.relativeLastUpdated('health')).toBeNull();
     });
+
+    /**
+     * The keys list. It had no entry in the widget map at all, so a failed load
+     * kept the previous keys on screen with nothing saying they were old, on the
+     * one page where a stale list is a security question rather than a cosmetic
+     * one.
+     */
+    it('tracks the keys list like every other widget', () => {
+      service.markFresh('keys');
+      expect(service.isStale('keys')).toBe(false);
+
+      service.markStale('keys');
+      expect(service.isStale('keys')).toBe(true);
+      expect(service.relativeLastUpdated('keys')).toContain('last updated');
+    });
+
+    /**
+     * Chrome that should stay quiet while the data is fresh. A 60 second poll
+     * would otherwise rewrite "3s ago" twice a minute to say nothing, so the note
+     * is for stale data and nothing else.
+     */
+    it('offers a note that is silent until the widget goes stale', () => {
+      expect(service.staleNote('usage')).toBeNull();
+
+      service.markFresh('usage');
+      expect(service.staleNote('usage')).toBeNull();
+
+      service.markStale('usage');
+      expect(service.staleNote('usage')).toContain('last updated');
+    });
+
+    it('drops the stale note again on the next success', () => {
+      service.markFresh('usage');
+      service.markStale('usage');
+      expect(service.staleNote('usage')).not.toBeNull();
+
+      service.markFresh('usage');
+      expect(service.staleNote('usage')).toBeNull();
+    });
+  });
+
+  /**
+   * The session notice, and the evidence that clears it.
+   *
+   * The redirect it sits beside is spent once. Without a notice that outlives it,
+   * a user whose re-minted token the gateway still refuses gets no explanation
+   * and no way forward, which is the state bounding the redirect created.
+   */
+  describe('the session notice', () => {
+    it('appears with the gateway message on a 401, even from a silent poll', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+
+      expect(service.sessionNotice()!.message).toBeTruthy();
+      expect(service.sessionNotice()!.kind).toBe('session_expired');
+    });
+
+    it('survives the redirect, because the trigger and the notice differ', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      service.acknowledgeSessionExpiry();
+
+      expect(service.sessionExpired()).toBe(false);
+      expect(service.sessionNotice()).not.toBeNull();
+    });
+
+    it('clears on the first gateway success, which is the proof the session works', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      service.reportSuccess();
+
+      expect(service.sessionNotice()).toBeNull();
+    });
+
+    it('is not cleared by dismissing the rate limit banner', () => {
+      // A dismiss click says "I have read this". It is not evidence that the
+      // gateway accepts the session, and must not be able to fake it.
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      const acceptedBefore = service.acceptedResponses();
+      service.dismissRateLimit();
+
+      expect(service.acceptedResponses()).toBe(acceptedBefore);
+      expect(service.sessionNotice()).not.toBeNull();
+    });
+
+    it('counts gateway successes, which is the only evidence of a working session', () => {
+      const before = service.acceptedResponses();
+      service.reportSuccess();
+      service.reportSuccess();
+
+      expect(service.acceptedResponses()).toBe(before + 2);
+    });
   });
 
   describe('hasAnyNotice', () => {
