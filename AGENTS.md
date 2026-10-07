@@ -10,6 +10,9 @@ AgentShield is a multi-tenant AI gateway and agent platform for small businesses
 - **MCP Server:** Java/Spring Boot (Port 8081)
 - **Infrastructure:** Redis, Splunk, Tripwire, Docker Compose
 
+## Build approach
+Tracer Bullet (vertical slices ship real value early).
+
 ## Agent Skills & Workflow
 We use a structured workflow to ensure technical consistency:
 
@@ -47,6 +50,7 @@ We use a structured workflow to ensure technical consistency:
 - [x] Made the metering DLQ redrivable: the dedup claim and the roll-up are one atomic Redis script, so a failed event no longer stays claimed and dies as a false duplicate (237 tests passing)
 - [x] Closed both defects the spec 0013 runtime check found: the 401 redirect latch is bounded by gateway evidence instead of the SDK session flag, with a session notice beside it, and the staleness note is bound on every widget including the keys list (172 portal tests passing)
 - [x] Implemented real telemetry aggregation from Redis $\rightarrow$ Splunk (Spec 0014): verified TLS with a collector certificate bearing SANs for `splunk` and `localhost`, health surface with reachability/ship-age/metrics, atomic redrive with 409 lock, DLQ capped with drop counter, and the CA deviation (Splunk's own encrypted CA key is unimplementable; the wrapper generates its own CA with explicit SANs); newline-delimited `{"event":{...}}` envelopes on `/event` index each event individually
+- [x] Closed the Spec 0014 verify gaps on 2026-10-07: the idle stack health defect fixed, the lost redrive interruption and collector rejection tests restored, and the spec's AC-2/AC-7 text amended to match the stack (408 backend tests, 172 portal tests)
 - [ ] Implement real billing integration (Stripe)
 - [ ] Build out the Java Gateway core logic
 
@@ -59,6 +63,8 @@ We use a structured workflow to ensure technical consistency:
 - Metering claims an event in `usage:processed_events` and applies its roll-up in one Redis script, because claiming first and writing second stranded a failed event in the ledger, which made the DLQ entry it was routed to redrive as a duplicate and drop the usage permanently. The scripts type check every key before the claim so a rejected event leaves nothing behind. That means the test suite needs `fakeredis[lua]`; install `requirements-dev.txt` or `eval` fails and every metering test fails with it.
 - The portal's 401 redirect latch re-arms only when a gateway 2xx proves the session works (`NotificationService.acceptedResponses`), never on the Auth0 SDK's own session flag. That flag answers "do I hold a structurally valid token", not "will the gateway accept it", so with an audience or issuer mismatch it is cheerfully authenticated on a token the gateway refuses: the latch re-armed, the re-minted token was refused in turn, and a browser run measured 261 token exchanges in 8 seconds. Bounding the loop is why `sessionNotice` exists: one automatic redirect, then a visible notice with a user pressed "Sign in again", cleared by the first gateway 2xx.
 - The stale-widget map in `gateway-error.interceptor.ts` is keyed on path substrings, so a trailing slash is load-bearing. `/api/v1/keys` has none because the key list is the bare path, and a revoke is a child of it; writing it like the other entries left the keys list with no way to record that its reload had failed, so it kept showing old keys behind no marker. A widget that is tracked but not bound is the silence spec 0013 exists to remove, and `.stale-note` had no CSS at all until 2026-10-05, which is why `/logs` had been rendering it as a bare paragraph.
+- The health entry's ship staleness only counts when work is waiting: `_undelivered_events` in `gateway/main.py` sums consumer group lag plus claimed but unacknowledged entries before a stale attempt becomes a failure. `XLEN telemetry:queue` is untrimmed history that only ever grows (1000+ is normal), so it is never a backlog signal, and an idle queue past the 300 second window is healthy by contract (Spec 0014 AC-7).
+- Clearing tripwire file integrity violations is `docker compose exec tripwire /approve.sh --yes` after reading the newest report in the container with `twprint -m r -r <report>`. Docker Desktop file sharing hiccups rewrite inodes while preserving content and mtime, which surfaces as roughly 110 violations at once; check the property column before trusting the count, then approve. A policy change is the exception: it invalidates the baseline on purpose and needs `docker compose run --rm -e TRIPWIRE_REBUILD_BASELINE=1 tripwire` (see `docs/runbooks/tripwire-rebaseline-runbook.md`).
 
 ## Project Memory
 For quick recall of recent changes, refer to the git history or the `docs/progress.md` (if created).

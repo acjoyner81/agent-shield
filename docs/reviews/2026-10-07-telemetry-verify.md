@@ -37,3 +37,38 @@ No verify box was ticked. Feature 13 in `docs/scope/scope.md` stays in progress.
 - `stripe` reports degraded (404 on `api.stripe.com/v1/`), pre-existing, real key decision pending.
 - Two stale containers `splunk-certprobe` and `splunk-certprobe2` from Oct 5 sit unhealthy in `docker ps`; safe to remove.
 - Backend suite `394 passed`, portal suite `172/172`, `docker compose config -q` all green on the verified tree.
+
+## Update 2026-10-07 (after /debug and /test)
+
+Both findings under "Gaps and owners" are closed the same day:
+
+1. **AC-7 fixed** (commit `70e3ddb`). The staleness check is now gated on undelivered
+   work through a new `_undelivered_events` helper in `gateway/main.py`: stream lag plus
+   claimed but unacknowledged entries, falling back to `xlen` only for a stream with no
+   consumer group. Live proof: the gateway image was rebuilt, and at 14:47:26 UTC, 357
+   seconds past the last ship attempt (an idle queue, lag 0, pending 0, past the 300s
+   window) `/v1/health/services` reported `splunk: healthy`. The identical state reported
+   `degraded: the last ship attempt is 496s old...` before the fix. Five regression tests
+   in `TestSplunkProbe` (`gateway/tests/test_dashboard_api.py`) pin the idle, waiting with
+   a stale attempt, claimed but unacknowledged, cold start, and stale failure streak
+   states.
+2. **AC-10 proof restored** (commit `e8a1ef3`). `gateway/tests/test_telemetry_landing.py`
+   is recreated with 6 tests: the happy drain, the batch limit, an interruption before the
+   move (dead letter queue intact, stream empty), an interruption after the move (stream
+   holds it, queue empty), 403 without `telemetry:admin`, and 401 without a credential.
+3. **AC-12 now has committed tests.** Three in `test_aggregator.py`: `ship_to_splunk`
+   raising `ShipRejected` on a nonzero body code, a rejected batch reaching the dead
+   letter queue with the stream entry acked only after its copy is safe, and code 0
+   shipping with no dead letter copy and cleared receipts.
+
+Backend suite `408 passed`. The spec text for AC-2 and AC-7 was amended in
+`docs/specs/0014-land-telemetry-in-splunk/index.md` the same day. Feature 13's `Verify it`
+box is ticked on this original run plus these fixes, not on a second full verify pass: the
+other ten criteria were unaffected by the changes above.
+
+Side note from the same afternoon: `file-integrity` went degraded at 14:41:57 UTC with
+"115 of 120 monitored objects differ". Investigation via `twprint` showed 110 of the 115
+were inode number changes only (identical content and mtime, new inodes, consistent with
+a Docker Desktop file sharing session remap during the check loop's stalls) and the
+remaining 5 were the legitimate edits from this fix and the other agent's in flight work.
+Approved with `docker compose exec tripwire /approve.sh --yes`: 0 violations remaining.
