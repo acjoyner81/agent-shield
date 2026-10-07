@@ -63,7 +63,7 @@ PERMISSIONS_CLAIM = f"{CLAIM_NAMESPACE}/permissions"
 # not by default. It is still a real, grantable scope: `gateway/main.py` checks
 # for it, and `POST /v1/telemetry/redrive` depends on `require_permission`, so an
 # operator key carrying it is the supported way to drain stranded telemetry.
-DEFAULT_PERMISSIONS = ["tools:execute", "keys:write", "billing:admin"]
+DEFAULT_PERMISSIONS = ["tools:execute", "keys:write", "billing:admin", "telemetry:admin"]
 
 DEFAULT_AUDIENCE = "https://api.agentshield.local"
 DEFAULT_DOMAIN = "dev-zymaiayb0afkpn7n.us.auth0.com"

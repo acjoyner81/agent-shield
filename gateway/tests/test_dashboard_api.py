@@ -36,7 +36,7 @@ from gateway.pricing import estimate_cost_usd, get_prices, price_per_1k
 client = TestClient(app)
 
 # DEV_MODE tokens, see gateway.auth.verify_token_credentials
-DEV_HEADERS = {"Authorization": "Bearer dev-mock-token"}  # permissions: tools:execute, logs:read
+DEV_HEADERS = {"Authorization": "Bearer dev-mock-token"}  # permissions: tools:execute, logs:read, keys:write, telemetry:admin
 UNPRIVILEGED_HEADERS = {"Authorization": "Bearer dev-unprivileged-token"}  # permissions: logs:read
 
 BILLING_ADMIN_CLAIMS = {
@@ -449,11 +449,15 @@ class TestHealthServices:
     """AC-4: one entry per service with a status and latency, and no tenant data."""
 
     @pytest.fixture(autouse=True)
-    def healthy_probes(self):
+    def healthy_probes(self, fake_redis):
         # Splunk is patched in too. A probe added to this surface is exercised by
         # every "everything is healthy" assertion here, so leaving the real one
         # running makes this file's tests depend on whether the developer happens
         # to have a collector configured.
+        #
+        # fake_redis is required, not incidental: the dev stand-in holds
+        # telemetry:admin, so the response carries the metrics object and the
+        # dead letter counts are read over Redis.
         with patch("gateway.main._probe_redis", new=AsyncMock()), patch(
             "gateway.main._probe_mcp", new=AsyncMock()
         ), patch("gateway.main._probe_stripe", new=AsyncMock()), patch(
@@ -533,6 +537,12 @@ class TestFileIntegrityProbe:
     @pytest.fixture
     def verdict_path(self, tmp_path):
         return tmp_path / "verdict.json"
+
+    @pytest.fixture(autouse=True)
+    def redis_for_metrics(self, fake_redis):
+        """The dev stand-in holds telemetry:admin, so the health response reads
+        the dead letter depth over Redis before it is returned."""
+        return fake_redis
 
     def _write(self, path, **fields):
         payload = {"verdict": "clean", "objects": 112, "violations": 0, "host": "agentshield-fim"}

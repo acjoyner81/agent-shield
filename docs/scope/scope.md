@@ -79,7 +79,7 @@ Make events actually arrive in Splunk, make the setup reproducible from the repo
 - [x] Design it (spec): `/architect land telemetry in splunk` → Spec 0014
 - [x] Build it: `/develop land telemetry in splunk`
    - [x] Persist Splunk config and data, enable the collector from a repo owned file, publish its CA (AC-3, AC-4, AC-2)
-   - [ ] Ship over verified TLS and prove one event lands in the index (AC-1, AC-2, AC-11) — the ship is built and the tests pass; the live proof against a fresh `docker compose up` is what keeps this open
+   - [x] Ship over verified TLS and prove one event lands in the index (AC-1, AC-2, AC-11) — proven 2026-10-07 on a fresh `docker compose up`: the aggregator shipped over TLS (`200 OK`), `index=main` returns the event by id, `/v1/health/services` reports splunk healthy, and the 582 stranded events redrove to `dlq_depth: 0`
    - [x] Collapse to one shipping path, read the collector response body, scrub personal data (AC-5, AC-12, AC-6)
    - [x] Cap the dead letter queue and count drops in one atomic script on a single push end (AC-8, AC-10)
    - [x] Add the health entry, the `telemetry:admin` scope, atomic redrive, and drain the stranded events (AC-7, AC-8, AC-9)

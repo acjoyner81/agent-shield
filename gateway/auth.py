@@ -51,10 +51,10 @@ def verify_token_credentials(token: str) -> dict[str, object]:
     """Validate an Auth0 access token string and return its claims."""
     dev_mode = environ.get("DEV_MODE")
     if dev_mode == "true":
-        # A dev stand-in grants tools:execute and keys:write with no signature
-        # check, so it is only ever safe while this process is a local
-        # development build. Refuse it anywhere else rather than trusting the
-        # deployment to remember the flag, which is how it was left hardcoded
+        # A dev stand-in grants tools:execute, keys:write and telemetry:admin
+        # with no signature check, so it is only ever safe while this process is
+        # a local development build. Refuse it anywhere else rather than trusting
+        # the deployment to remember the flag, which is how it was left hardcoded
         # "true" in compose and served credentials to anything that could reach
         # the port.
         if settings.app_env != "development":
@@ -68,6 +68,9 @@ def verify_token_credentials(token: str) -> dict[str, object]:
         # they would test a token shape that cannot exist and hide a real
         # mismatch. In particular `permissions` is namespaced, because the bare
         # name is reserved by Auth0's RBAC and never arrives on a real token.
+        # telemetry:admin is seeded here for the same reason it must be in
+        # DEFAULT_PERMISSIONS: without it no local principal can reach the
+        # redrive route, so its acceptance criteria cannot be exercised at all.
         if token == "dev-mock-token":
             logger.warning(
                 "served unauthenticated dev stand-in claims for dev-mock-token"
@@ -75,7 +78,12 @@ def verify_token_credentials(token: str) -> dict[str, object]:
             return {
                 "sub": "user_dev_123",
                 TENANT_CLAIM: "tenant_alpha",
-                PERMISSIONS_CLAIM: ["tools:execute", "logs:read", "keys:write"],
+                PERMISSIONS_CLAIM: [
+                    "tools:execute",
+                    "logs:read",
+                    "keys:write",
+                    "telemetry:admin",
+                ],
             }
         if token == "dev-unprivileged-token":
             logger.warning(

@@ -47,6 +47,10 @@ services:
       # reports degraded with a reason rather than refusing to boot the gateway.
       SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-https://splunk:8088/services/collector/event}
       SPLUNK_HEC_CA: /etc/agentshield/splunk-ca/ca.crt
+      # The probe authenticates like any other shipper: the collector refuses
+      # an unauthenticated post, so without this the health entry could only
+      # ever report that shipping cannot be attempted.
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:?Set SPLUNK_HEC_TOKEN in .env}
       SPLUNK_HEALTH_MAX_SHIP_AGE_SEC: ${SPLUNK_HEALTH_MAX_SHIP_AGE_SEC:-300}
     volumes:
       # Tripwire publishes its integrity verdict on tripwire-data, and the

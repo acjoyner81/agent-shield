@@ -294,13 +294,16 @@ async def _probe_splunk() -> None:
             f"the Splunk certificate authority {SPLUNK_HEC_CA} is not published yet"
         )
 
+    # The reachability check reads the collector's own health endpoint rather
+    # than posting an empty batch to /event: the collector answers an empty
+    # post with 400, so that probe could only ever degrade, and a probe that
+    # sends a synthetic event to prove delivery would pollute the very index
+    # it is proving. TLS is still verified against the published authority, and
+    # authenticated delivery is proven by the receipts below, which only a
+    # successful ship writes.
+    health_url = SPLUNK_HEC_URL.removesuffix("/event") + "/health"
     async with httpx.AsyncClient(verify=SPLUNK_HEC_CA) as client:
-        response = await client.post(
-            SPLUNK_HEC_URL,
-            headers={"Authorization": f"Splunk {SPLUNK_HEC_TOKEN_ENV}"},
-            content="",
-            timeout=PROBE_TIMEOUT_SECONDS,
-        )
+        response = await client.get(health_url, timeout=PROBE_TIMEOUT_SECONDS)
         response.raise_for_status()
 
     client = aioredis.from_url(settings.redis_url, decode_responses=True)
