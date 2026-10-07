@@ -1,7 +1,14 @@
 # 0013. Standardize gateway error handling in the Angular portal
 
 **Date**: 2026-09-29
-**Status**: Accepted
+**Status**: In Progress
+
+> Status corrected 2026-10-05, from `Accepted` to `In Progress`, because verification came back
+> Partial rather than passing. Every classification, surface, precedence, accessibility and
+> honesty rule was proven against real gateway refusals, but two statements in this spec are
+> still unmet: a persistently rejected token loops re-auth with no limit (261 token exchanges in
+> 8s), and the "last updated N ago" note is bound only on `/logs`. Both are recorded in
+> `verify.md`. The decision stands; the feature is not verified.
 
 ## Summary
 
@@ -105,7 +112,7 @@ this.http.get<UsageSummary>('/api/v1/usage/summary', {
 | Status | Kind | Policy at known call sites | Where it renders | Clears when |
 |---|---|---|---|---|
 | 400 | `guardrail_blocked` | `silent` | Inline at the call site | n/a, no consumer yet |
-| 401 | `session_expired` | `banner`, never `silent` | App level, plus one redirect through Auth0 | Redirect completes |
+| 401 | `session_expired` | `banner`, never `silent` | App level, plus one redirect through Auth0 | The first gateway 2xx |
 | 402 | `budget_exhausted` | `banner` | App level, one banner | Dismissed by the user, returns on the next 402 |
 | 403 | `scope_denied` | `banner` | App level, naming the missing scope | Dismissed by the user |
 | 429 | `rate_limited` | `banner` (sticky) | App level, with a countdown | `Retry-After` elapses, or the first success, whichever is first |
@@ -152,8 +159,15 @@ All state lives in `NotificationService` as signals. No component holds error st
 |---|---|---|---|
 | `budgetBanner` | A 402 is reported | User dismisses it, or a new 402 | One banner, not keyed by tenant: the portal has no tenant identity source, and a session is a single tenant, so a key would be unavailable exactly when it is needed. Dismissal is per banner, not a mute. A later 402 shows it again, so it is impossible to dismiss once and never learn the budget is still out. |
 | `rateLimit` | A 429 is reported | `Retry-After` elapses **or** the first 2xx, whichever is first | A second 429 updates the existing entry, it never stacks. Actions may be dimmed or disabled while set. The countdown is recomputed on every 429. |
-| `sessionExpired` | A 401 is reported | Redirect completes | One redirect only, guarded by a flag so a burst of 401s cannot start a redirect storm. |
-| `staleWidgets` | A `silent` poll fails | That poll next succeeds | Per widget, holding the last known values and a `lastUpdatedAt`. Never clears values. |
+| `sessionExpired` | A 401 is reported | The redirect is spent, which is immediate and not a state transition anyone waits on | One redirect only, guarded by a flag so a burst of 401s cannot start a redirect storm. The flag re arms only on evidence, below. |
+| `sessionNotice` | A 401 is reported | The first gateway 2xx after it | The visible half of an expiry, and it outlives the redirect on purpose. See below. |
+| `staleWidgets` | A `silent` poll fails | That poll next succeeds | Per widget, holding the last known values and a `lastUpdatedAt`. Never clears values. Every widget renders its note: a flag with nothing bound to it is the same silence this spec exists to remove. |
+
+**"The redirect completes" means the gateway accepted the session, and nothing weaker counts.** The flag is spent the moment the redirect is issued, so what re arms it is the question of whether a later, genuine expiry is worth another trip through Auth0. The evidence is a 2xx from the gateway. The Auth0 SDK's own session flag is not evidence, because it answers "do I hold a structurally valid token", not "will the gateway accept it": with an audience or issuer mismatch, or a blocked user, the SDK is cheerfully authenticated on a token the gateway refuses, the flag re arms, the re-minted token is refused in turn, and the portal re-authenticates forever. The first runtime check measured that at 261 token exchanges and 1018 refused calls in about eight seconds. So the container counts gateway successes, and a count that has not moved since the redirect was issued leaves the redirect spent.
+
+**Bounding the redirect obliges a notice.** Once the automatic retry is capped at one, a session the gateway still refuses has no automatic way out, so `sessionNotice` stays up until something proves the session works, with a sign in control the user presses. A user driven retry cannot become a storm, because a user has to be there. The notice renders `role="alert"` because it is the one state that needs action now, and it stacks inside the notice region rather than taking the budget banner's fixed slot, so the two never overlap.
+
+**The staleness note is bound everywhere the data is.** `/logs` was the only page that rendered one when the first check ran, which left the dashboard's usage figures and the keys list keeping old numbers behind no marker. A widget map written with trailing slashes misses the bare `/api/v1/keys` path, so the keys widget is mapped on the exact path. The note shows only while stale on these pages: a 60 second poll would otherwise rewrite "3s ago" twice a minute to tell the user nothing.
 
 **`Retry-After` is integer seconds in practice.** `rate_limit.py:187` writes it on every 429 and it is always a positive whole number of seconds. When the header is missing or unparseable the classifier omits `retryAfterSeconds` and the banner carries no countdown, clearing on the next success alone. It never guesses a duration.
 
@@ -163,7 +177,7 @@ All state lives in `NotificationService` as signals. No component holds error st
 
 ### Accessibility
 
-- The app level container is a live region. Banners use `role="status"` and polite announcement, the budget banner uses `role="alert"` because it requires action.
+- The app level container is a live region. Banners use `role="status"` and polite announcement, the budget banner uses `role="alert"` because it requires action, and so does the session notice, which is the other state a user has to act on now.
 - No notification moves focus. A user typing in a form is not interrupted.
 - Every dismiss control has an accessible name, not a bare glyph.
 - The rate limit countdown is announced on entry and on clear, never once per second.
@@ -229,6 +243,7 @@ The backend change is one `raise`. `main.py:626` raises 402 with the bare string
 
 ## Follow-up
 
+- [ ] Re run the runtime check on this spec. The two defects it found are fixed and covered by tests that reproduce their conditions, but the fixes themselves have not yet been driven through a browser against the real gateway, so the PARTIAL verdict in `verify.md` stands until they are.
 - [ ] Build a prompt tester surface so `guardrail_blocked` has a consumer and the guardrail message is reachable end to end.
 - [ ] Emit client error events to `POST /v1/telemetry/logs` so support can confirm a user actually saw a banner. Needs a client event schema and a privacy call on what context may leave the browser.
 - [ ] Remove the duplicated Auth0 audience literal in `app.config.ts` by reading it from `environment.auth0.authorizationParams.audience`. A one line fix that does not belong to this decision.
