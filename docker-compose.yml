@@ -108,6 +108,13 @@ services:
       # because that directory holds Splunk's private keys and handing those to two
       # other services would defeat the point of sharing the authority.
       - splunk-ca:/opt/splunk/ca-share
+      # AgentShield saved searches app, staged outside /opt/splunk: Splunk's
+      # provisioning recursively chowns /opt/splunk/etc at boot, which fails
+      # outright (EROFS) on a read-only bind mount placed inside it. The
+      # entrypoint-wrapper copies this directory into etc/apps before Splunk
+      # starts, so a volume wipe is still self-healing: the source lives in the
+      # repository, not in the volume.
+      - ./splunk/agent-shield-apps:/opt/agentshield-apps:ro
       - ./splunk/entrypoint-wrapper.sh:/sbin/entrypoint-wrapper.sh:ro
     healthcheck:
       # Verified against the published authority rather than -k. The certificate

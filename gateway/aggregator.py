@@ -55,6 +55,7 @@ SPLUNK_HEC_SOURCETYPE = os.environ.get("SPLUNK_HEC_SOURCETYPE", "agentshield:tel
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "100"))
 BATCH_TIMEOUT_SEC = int(os.environ.get("BATCH_TIMEOUT_SEC", "5"))
+MIN_IDLE_TIME_SEC = int(os.environ.get("MIN_IDLE_TIME_SEC", "180"))
 TELEMETRY_DLQ_MAX = int(os.environ.get("TELEMETRY_DLQ_MAX", "10000"))
 MAX_RETRIES = 5
 
@@ -199,6 +200,14 @@ async def record_failure(r, reason: str) -> None:
         await r.hincrby(SHIP_KEY, "consecutive_failures", 1)
     except Exception as exc:  # pragma: no cover - receipt is best effort
         logger.warning("Could not record ship failure: %s", exc)
+
+
+async def record_reclaim(r, count: int) -> None:
+    """Bump the reclaim counter, so a crash recovery shows up in the receipts."""
+    try:
+        await r.hincrby(SHIP_KEY, "reclaims", count)
+    except Exception as exc:  # pragma: no cover - receipt is best effort
+        logger.warning("Could not record reclaim receipt: %s", exc)
 
 
 def _body_code(response: httpx.Response) -> Tuple[int, str]:
@@ -392,6 +401,47 @@ async def run_aggregator() -> None:
     await ensure_consumer_group(r)
     async with httpx.AsyncClient(verify=ca_path) as client:
         while True:
+            # Reclaim entries a crashed consumer claimed and never acked, so a
+            # restart does not strand them in the dead consumer's pending list
+            # forever. XAUTOCLAIM returns (next_cursor, entries, deleted_ids),
+            # where each entry is (message_id, fields). The returned entries are
+            # *owned* by this consumer now, so they must be routed here rather
+            # than read again: `xreadgroup ">"` never delivers them a second time.
+            reclaimed, strays = [], []
+            _, claimed_entries, _ = await r.xautoclaim(
+                QUEUE_KEY,
+                GROUP_NAME,
+                CONSUMER_NAME,
+                min_idle_time=MIN_IDLE_TIME_SEC,
+            )
+            for message_id, fields in claimed_entries:
+                payload = fields.get("payload")
+                if payload is None:
+                    # A corrupt or pre-convention entry has nothing to ship, so
+                    # it cannot be recovered. Copy the record to the dead letter
+                    # queue and ack it, or the reclaim loop would pin it forever.
+                    strays.append((message_id, fields))
+                else:
+                    reclaimed.append((message_id, payload))
+
+            if strays:
+                await dlq_push(
+                    r, [json.dumps(fields) for _, fields in strays], TELEMETRY_DLQ_MAX
+                )
+                await r.xack(QUEUE_KEY, GROUP_NAME, *[mid for mid, _ in strays])
+                logger.warning(
+                    "Dead lettered %d reclaimed entries with no payload",
+                    len(strays),
+                )
+
+            if reclaimed:
+                await record_reclaim(r, len(reclaimed))
+                logger.info(
+                    "Recovered %d pending entries via XAUTOCLAIM", len(reclaimed)
+                )
+                await ship_batch(client, r, reclaimed)
+                continue
+
             batch: List[Tuple[str, str]] = []
             await collect_batch(r, batch)
             if not batch:

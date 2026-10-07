@@ -1,0 +1,5 @@
+# Export the app's saved searches system-wide so they resolve from the
+# global savedsearches endpoint the same way the REST-seeded originals did,
+# rather than being private to the agent-shield-apps namespace.
+[savedsearches]
+export = system

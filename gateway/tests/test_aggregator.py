@@ -206,3 +206,98 @@ async def test_an_accepted_batch_ships_without_touching_the_dead_letter_queue(mo
     receipts = await r.hgetall(aggregator.SHIP_KEY)
     assert receipts["consecutive_failures"] == "0"
     assert receipts["last_error"] == ""
+
+
+async def _stale_pending(r, fields):
+    """Enqueue one entry and claim it with a crashed consumer that never acks.
+
+    That leaves the entry pending in the dead consumer's list, which is exactly
+    the zombie the XAUTOCLAIM reclaim exists to recover on the next boot.
+    """
+    await aggregator.ensure_consumer_group(r)
+    await r.xadd(aggregator.QUEUE_KEY, fields)
+    await r.xreadgroup(
+        aggregator.GROUP_NAME,
+        "crashed-consumer",
+        {aggregator.QUEUE_KEY: ">"},
+        count=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reclaimed_entries_are_shipped_and_acked(monkeypatch):
+    """A crash orphan, once reclaimed, is shipped on the next loop and acked,
+    and the recovery is counted in the receipts."""
+    r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(aggregator.redis, "from_url", lambda *a, **k: r)
+    monkeypatch.setattr(aggregator, "SPLUNK_HEC_TOKEN", "test-collector-token")
+    monkeypatch.setattr(aggregator, "MIN_IDLE_TIME_SEC", 0)
+    monkeypatch.setattr(aggregator, "dump_to_stdout", _noop)
+
+    async def ca_ready():
+        return True
+
+    monkeypatch.setattr(aggregator, "wait_for_ca", ca_ready)
+
+    shipped = []
+
+    async def record_ship(client, payloads):
+        shipped.extend(payloads)
+
+    monkeypatch.setattr(aggregator, "ship_to_splunk", record_ship)
+
+    payload = '{"level":"INFO","message":"orphaned by a crash"}'
+    await _stale_pending(r, {"payload": payload})
+
+    async def stop_on_first_read(*args, **kwargs):
+        raise StopLoop
+
+    monkeypatch.setattr(r, "xreadgroup", stop_on_first_read)
+
+    with pytest.raises(StopLoop):
+        await aggregator.run_aggregator()
+
+    assert shipped == [payload]
+    pending = await r.xpending(aggregator.QUEUE_KEY, aggregator.GROUP_NAME)
+    assert _pending_count(pending) == 0
+    assert await r.llen(aggregator.DLQ_KEY) == 0
+    receipts = await r.hgetall(aggregator.SHIP_KEY)
+    assert receipts["reclaims"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_reclaimed_entries_without_a_payload_dead_letter_and_ack(monkeypatch):
+    """A reclaimed entry with no payload cannot be shipped, so it is copied to
+    the dead letter queue and acked, breaking the reclaim loop instead of
+    pinning an undeliverable entry forever."""
+    r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(aggregator.redis, "from_url", lambda *a, **k: r)
+    monkeypatch.setattr(aggregator, "SPLUNK_HEC_TOKEN", "test-collector-token")
+    monkeypatch.setattr(aggregator, "MIN_IDLE_TIME_SEC", 0)
+    monkeypatch.setattr(aggregator, "dump_to_stdout", _noop)
+
+    async def ca_ready():
+        return True
+
+    monkeypatch.setattr(aggregator, "wait_for_ca", ca_ready)
+
+    async def forbid_ship(client, payloads):
+        raise AssertionError("a payload-less reclaimed entry must not ship")
+
+    monkeypatch.setattr(aggregator, "ship_to_splunk", forbid_ship)
+
+    await _stale_pending(r, {"message": "no payload field"})
+
+    async def stop_on_first_read(*args, **kwargs):
+        raise StopLoop
+
+    monkeypatch.setattr(r, "xreadgroup", stop_on_first_read)
+
+    with pytest.raises(StopLoop):
+        await aggregator.run_aggregator()
+
+    assert await r.lrange(aggregator.DLQ_KEY, 0, -1) == ['{"message": "no payload field"}']
+    pending = await r.xpending(aggregator.QUEUE_KEY, aggregator.GROUP_NAME)
+    assert _pending_count(pending) == 0
+    receipts = await r.hgetall(aggregator.SHIP_KEY)
+    assert receipts.get("reclaims") is None

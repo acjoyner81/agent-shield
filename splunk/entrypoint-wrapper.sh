@@ -19,6 +19,8 @@
 #      alternative names at all and therefore cannot verify for any hostname
 #   3. hand that certificate to the image's own Splunk provisioning, which is the
 #      step that actually enables the collector
+#   4. stage the AgentShield saved searches app (bind-mounted at
+#      /opt/agentshield-apps) into etc/apps so the searches survive a volume wipe
 #
 # Why the authority is issued here rather than reused from Splunk: Splunk's CA
 # private key at /opt/splunk/etc/auth/ca.pem is an encrypted PKCS#12 blob that
@@ -264,6 +266,29 @@ if missing:
 open(path, "w").write("\n".join(out) + "\n")
 print("[Splunk Wrapper] patched hec.cert and hec.password in %s" % path)
 PY
+
+# ---------------------------------------------------------------------------
+# 4. Stage the AgentShield saved searches app
+#
+# The app is bind-mounted read-only at /opt/agentshield-apps (outside
+# /opt/splunk, because Splunk's provisioning recursively chowns
+# /opt/splunk/etc and an EROFS on a read-only mount inside it aborts the
+# whole playbook). It is copied into etc/apps here, before Splunk starts, so:
+#   - a wiped splunk-etc volume reboots with all three searches defined
+#   - edits in the repository take effect on the next restart
+#   - no REST call is needed, which is just as well because splunkd's
+#     management port does not exist yet at this point in the boot
+# ---------------------------------------------------------------------------
+APP_SRC=/opt/agentshield-apps
+APP_DST=/opt/splunk/etc/apps/agent-shield-apps
+[ -f "${APP_SRC}/default/savedsearches.conf" ] || die "the saved searches app is not mounted at ${APP_SRC}."
+log "staging the AgentShield saved searches app into etc/apps"
+# On a fresh etc volume the apps directory does not exist either: Splunk creates
+# it during its own bootstrap, which has not run at this point.
+sudo mkdir -p /opt/splunk/etc/apps
+sudo rm -rf "$APP_DST"
+sudo cp -R "$APP_SRC" "$APP_DST"
+sudo test -f "${APP_DST}/default/savedsearches.conf" || die "staging the saved searches app failed."
 
 # Execute official Splunk entrypoint
 if [ $# -eq 0 ]; then
