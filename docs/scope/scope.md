@@ -30,6 +30,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 16 | Eval Judge for Quality Scoring | Slice 4 | planned |
 | 17 | Stripe Metered Usage Reporting | Slice 3 | planned |
 | 18 | Prompt Tester for Guardrails | Slice 4 | planned |
+| 19 | Java Gateway Core Logic | Slice 5 | planned |
 
 ## Foundations
 
@@ -247,6 +248,21 @@ Stamp a pass or fail on completed requests so the dashboard's quality pass rate 
 Give the 400 guardrail path a surface that exercises it end to end, so a blocked prompt is reachable in the product instead of only in tests.
 **Done when:** an operator can submit a prompt in the portal, see it blocked by the guardrail with the reason named on screen, and see the telemetry event that followed.
 - [ ] Build it: `/develop prompt tester for guardrails`
+
+### 19. Java Gateway Core Logic · planned · Slice 5
+
+Implement the Java Spring Boot gateway core logic as a complementary gateway service.
+**Done when:** the Java gateway starts and registers healthy, JWT validation is configured, and it coexists with the Python gateway.
+
+- [ ] Design it (spec): `/architect java gateway core logic`
+- [ ] Build it: `/develop java gateway core logic`
+   - [ ] Implement Spring Boot `@SpringBootApplication` entry point
+   - [ ] Configure OAuth2 resource server with JWT decoder and audience/issuer validators
+   - [ ] Implement health check endpoint registering `gateway-java` as healthy
+   - [ ] Ensure tripwire compliance for any file changes in the Java gateway path
+   - [ ] Coordinate with Python gateway telemetry routing
+
+Spec 0015 · code in `java-services/gateway-java/`
 
 ## Deferred
 Out of scope for the current build pass, kept so the plan stays honest.
