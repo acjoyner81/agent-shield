@@ -271,17 +271,43 @@ def _epoch_seconds(value) -> Optional[float]:
         return None
 
 
+async def _undelivered_events(r) -> int:
+    """Events the aggregator has not taken, or has taken but confirmed nowhere.
+
+    The stream's raw length cannot answer this: acknowledged entries are never
+    trimmed, so the length only grows with history. What counts as waiting is
+    what the consumer group has not delivered yet (lag), plus what it delivered
+    but no ship or dead letter entry has acknowledged (pending). An entry that
+    nobody has confirmed is exactly the event a health surface must not lose
+    track of, even when the stream's lag reads zero.
+    """
+    try:
+        groups = await r.xinfo_groups(TELEMETRY_QUEUE_KEY)
+    except redis.ResponseError:
+        # No stream yet, so nothing is waiting.
+        return 0
+    if not groups:
+        # A stream the aggregator's group has never claimed: every entry is.
+        return await r.xlen(TELEMETRY_QUEUE_KEY)
+    return sum((g.get("lag") or 0) + (g.get("pending") or 0) for g in groups)
+
+
 async def _probe_splunk() -> None:
     """Report whether telemetry is actually reaching Splunk.
 
-    Three separate things are checked, and each names itself in the reason:
+    Four separate things are checked, and each names itself in the reason:
 
     1. the collector answers on TLS, verified against the published authority
-    2. a ship that was attempted has succeeded recently enough
+    2. events wait while no ship has been attempted inside the window
     3. events are queued but nothing has ever shipped
+    4. the last thing that happened was a failed ship, with no success inside
+       the window
 
     Without the third, a cold start reports healthy while silently discarding
-    every event, which is the state this whole spec exists to end.
+    every event, which is the state this whole spec exists to end. Staleness
+    only applies while events wait: an idle queue whose last ship succeeded is
+    healthy however long ago that was, so a quiet night does not read as an
+    outage.
     """
     if not SPLUNK_HEC_TOKEN_ENV:
         raise RuntimeError("SPLUNK_HEC_TOKEN is not configured, so shipping cannot be attempted")
@@ -310,26 +336,42 @@ async def _probe_splunk() -> None:
     try:
         receipt = await client.hgetall(SHIP_RECEIPT_KEY)
         now = time.time()
+        waiting = await _undelivered_events(client)
 
         last_attempt = _epoch_seconds(receipt.get("last_attempt"))
-        if last_attempt is not None:
-            age = now - last_attempt
-            if age > SPLUNK_SHIP_STALE_SECONDS:
-                failures = receipt.get("consecutive_failures") or "?"
-                reason = receipt.get("last_error") or "no reason recorded"
-                raise RuntimeError(
-                    f"the last ship attempt is {int(age)}s old, over the "
-                    f"{SPLUNK_SHIP_STALE_SECONDS}s limit ({failures} consecutive "
-                    f"failures): {reason}"
-                )
-
         last_success = _epoch_seconds(receipt.get("last_success"))
-        if last_success is None:
-            queued = await client.xlen(TELEMETRY_QUEUE_KEY)
-            if queued:
+        try:
+            failures = int(receipt.get("consecutive_failures") or 0)
+        except (TypeError, ValueError):
+            failures = 0
+        reason = receipt.get("last_error") or "no reason recorded"
+
+        if waiting:
+            if last_success is None:
                 raise RuntimeError(
-                    f"{queued} events are queued and no ship has ever succeeded"
+                    f"{waiting} events are queued and no ship has ever succeeded"
                 )
+            age = None if last_attempt is None else now - last_attempt
+            if age is None or age > SPLUNK_SHIP_STALE_SECONDS:
+                when = (
+                    "has never been attempted"
+                    if age is None
+                    else f"is {int(age)}s old, over the {SPLUNK_SHIP_STALE_SECONDS}s limit"
+                )
+                raise RuntimeError(
+                    f"{waiting} events are queued and the last ship attempt {when} "
+                    f"({failures} consecutive failures): {reason}"
+                )
+        elif failures and (last_success is None or now - last_success > SPLUNK_SHIP_STALE_SECONDS):
+            since_success = (
+                "has never succeeded"
+                if last_success is None
+                else f"is {int(now - last_success)}s old, over the {SPLUNK_SHIP_STALE_SECONDS}s limit"
+            )
+            raise RuntimeError(
+                f"the last successful ship {since_success} "
+                f"({failures} consecutive failures): {reason}"
+            )
     finally:
         await client.aclose()
 

@@ -11,6 +11,7 @@ Covers the acceptance criteria for the two dashboard reads:
 import json
 import os
 import fnmatch
+import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,6 +23,7 @@ from gateway.auth import resolve_active_tenant
 from gateway.main import (
     INTEGRITY_STALE_SECONDS,
     _probe_file_integrity,
+    _probe_splunk,
     _verdict_age_seconds,
     app,
 )
@@ -703,3 +705,123 @@ class TestFileIntegrityProbe:
 
         for leak in ["tenant_alpha", "tenant_id", "usage", "tokens"]:
             assert leak not in body
+
+
+class TestSplunkProbe:
+    """AC-7: the splunk entry tells an idle stack from a stalled one.
+
+    An idle queue whose last ship succeeded long ago is healthy, however old
+    that ship is. Work that waits with no recent attempt, an entry claimed but
+    never acknowledged, and a failure streak with no success inside the window
+    are each degraded, each with a reason that names itself.
+    """
+
+    QUEUE = "telemetry:queue"
+    GROUP = "telemetry-aggregator"
+
+    @pytest.fixture(autouse=True)
+    def ready(self, fake_redis, monkeypatch):
+        monkeypatch.setattr("gateway.main.SPLUNK_HEC_TOKEN_ENV", "test-token")
+        # /dev/null exists, so the certificate authority check passes.
+        monkeypatch.setattr("gateway.main.SPLUNK_HEC_CA", os.devnull)
+        return fake_redis
+
+    @staticmethod
+    def _collector_answers(monkeypatch):
+        """A reachable collector, so only the Redis side of the probe decides."""
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+        class Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, *args, **kwargs):
+                return Response()
+
+        monkeypatch.setattr("gateway.main.httpx.AsyncClient", Client)
+
+    @staticmethod
+    def _receipt(r, **extra):
+        fields = {
+            "last_attempt": str(time.time() - 10_000),
+            "last_success": str(time.time() - 10_000),
+            "consecutive_failures": "0",
+            "last_error": "",
+        }
+        fields.update(extra)
+        r.hset("telemetry:ship", mapping=fields)
+
+    @staticmethod
+    def _waiting_event(r):
+        # The entries have to exist before the group does: that is the order in
+        # which the group's lag counts them as undelivered. Two of them, because
+        # fakeredis reports a lag one short for a group that has never
+        # delivered, while real Redis counts both.
+        r.xadd("telemetry:queue", {"payload": '{"event_id": "evt_waiting"}'})
+        r.xadd("telemetry:queue", {"payload": '{"event_id": "evt_waiting_too"}'})
+        r.xgroup_create("telemetry:queue", "telemetry-aggregator", id="0", mkstream=True)
+
+    @pytest.mark.asyncio
+    async def test_an_idle_queue_with_old_receipts_is_healthy(self, ready, monkeypatch):
+        """AC-7: an idle queue and no failures is healthy, however old the ship."""
+        self._receipt(ready)
+        self._collector_answers(monkeypatch)
+
+        await _probe_splunk()
+
+    @pytest.mark.asyncio
+    async def test_waiting_events_with_a_stale_attempt_degrade_with_the_count(self, ready, monkeypatch):
+        self._receipt(ready)
+        self._waiting_event(ready)
+        self._collector_answers(monkeypatch)
+
+        with pytest.raises(RuntimeError, match="events are queued and the last ship attempt"):
+            await _probe_splunk()
+
+    @pytest.mark.asyncio
+    async def test_a_claimed_but_unacknowledged_event_counts_as_waiting(self, ready, monkeypatch):
+        """An entry in the pending list has been delivered to the consumer but
+        confirmed by no one, so it is waiting work even with a stream lag of 0."""
+        self._receipt(ready)
+        ready.xadd("telemetry:queue", {"payload": '{"event_id": "evt_claimed"}'})
+        ready.xgroup_create("telemetry:queue", "telemetry-aggregator", id="0", mkstream=True)
+        ready.xreadgroup(
+            "telemetry-aggregator",
+            "some-consumer",
+            streams={"telemetry:queue": ">"},
+        )
+        self._collector_answers(monkeypatch)
+
+        with pytest.raises(RuntimeError, match="1 events are queued"):
+            await _probe_splunk()
+
+    @pytest.mark.asyncio
+    async def test_events_that_never_shipped_degrade_on_a_cold_start(self, ready, monkeypatch):
+        ready.xadd("telemetry:queue", {"payload": '{"event_id": "evt_cold"}'})
+        self._collector_answers(monkeypatch)
+
+        with pytest.raises(RuntimeError, match="no ship has ever succeeded"):
+            await _probe_splunk()
+
+    @pytest.mark.asyncio
+    async def test_a_stale_failure_streak_degrades_with_its_reason(self, ready, monkeypatch):
+        """A failure streak older than the window stays degraded even when the
+        queue drained, because nothing has succeeded inside the window since."""
+        self._receipt(
+            ready,
+            consecutive_failures="3",
+            last_error="collector refused the batch: code=3",
+        )
+        self._collector_answers(monkeypatch)
+
+        with pytest.raises(RuntimeError, match="3 consecutive failures.*collector refused"):
+            await _probe_splunk()
