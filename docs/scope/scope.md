@@ -105,7 +105,7 @@ Integrate Auth0 for authentication and map JWT claims to tenant roles (tenant ad
 - [ ] Document it: `/document auth0 integration`
 Spec 0004 · code in `gateway/main.py`
 
-### 5. RBAC Enforcement · in-progress · GA
+### 5. RBAC Enforcement · in-progress (verified) · GA
 Implement gateway level access control to restrict MCP tool execution based on the user role.
 **Done when:** developer roles are blocked from admin tools and tenant admins have full access.
 - [x] Design it (spec): `/architect rbac enforcement`
@@ -114,7 +114,7 @@ Implement gateway level access control to restrict MCP tool execution based on t
    - [x] Build the `require_permission` dependency factory
    - [x] Wire 403 responses and authz telemetry
    - [x] Secure `/v1/tools/execute` as the tracer bullet
-- [ ] Verify it: `/check verify rbac enforcement` — re-run 2026-10-08. AC-1 and AC-3 pass live; AC-4 was found failing (the `authz_failure` event dropped the required permission) and **fixed** — the event now carries `required_permission` beside `user_id`/`tenant_id`, with regression tests that fail without the fix. AC-2 remains **blocked**: no real Auth0 access token or management credentials exist here, so the namespaced claim read is proven only against the DEV stand-in. Details in `docs/specs/0005-rbac-enforcement/verify.md`. Next: supply a real token to close AC-2, then re-run `/check verify rbac enforcement`.
+- [x] Verify it: `/check verify rbac enforcement` — PASS 2026-10-08 against the current build. AC-1/AC-3 enforced live; AC-4 was found failing (the `authz_failure` event dropped the required permission) and fixed with a regression test the emitter now fails without; AC-2 closed against a real Auth0 access token from a Google login (namespaced claim read, `GET /v1/keys` → 200, unheld scope → 403 with the exact detail). Details in `docs/specs/0005-rbac-enforcement/verify.md`.
 - [ ] Test it: `/test rbac enforcement`
 - [ ] Document it: `/document rbac enforcement`
 Spec 0005 · code in `gateway/main.py`

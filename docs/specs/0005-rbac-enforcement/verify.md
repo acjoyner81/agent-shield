@@ -1,24 +1,22 @@
 # Verify: Granular RBAC Enforcement · spec 0005 · updated 2026-10-08
 _Steps derived from spec 0005 acceptance criteria. `/check verify` runs these; `/test` locks the durable ones._
 
-## Result (2026-10-08 run) — verdict BLOCKED on AC-2 (AC-1, AC-3, AC-4 met)
+## Result (2026-10-08 run) — verdict PASS (all four AC met)
 Re-ran the stale 2026-09-23 record against the current build (post `c1c4fa3`, the namespaced
-permissions claim). Driven live against `http://localhost:8000`, real Redis.
+permissions claim). Driven live against `http://localhost:8000`, real Redis, and a real Auth0
+access token from a Google login.
 
 | AC | Verdict | Evidence |
 |---|---|---|
 | AC-1 | met | `gateway/main.py:723` declares `Depends(require_permission("tools:execute"))`; the route enforces it live. |
-| AC-2 | **blocked** | Proven only for the DEV stand-in, whose claims carry the namespaced `https://api.agentshield.local/permissions` claim (`gateway/auth.py:69-97`). The real Auth0 JWKS decode path could not be exercised: no real access token, no `AUTH0_MGMT_TOKEN`, no login credentials exist in this environment. Use `auth0/seed_and_verify.py --access-token <real>` or seed a user to close it. |
-| AC-3 | met | `POST /v1/tools/execute` with `dev-unprivileged-token` → `403 {"detail":"Permission denied: missing required scope 'tools:execute'"}` exactly; `dev-mock-token` (scope held) → `200`. |
+| AC-2 | met | Real Auth0 access token for `google-oauth2|110211129478028760383` (Google login through the Post-Login Action). The access token carried the namespaced `https://api.agentshield.local/permissions = ["tools:execute","keys:write","billing:admin"]` and `aud` including `https://api.agentshield.local`. `auth0/seed_and_verify.py --access-token …` reported `PASS decode` and `PASS gateway`; `GET /v1/keys` → 200; `POST /v1/telemetry/redrive` (scope not held) → 403 naming `telemetry:admin`. |
+| AC-3 | met | `POST /v1/tools/execute` with `dev-unprivileged-token` → `403 {"detail":"Permission denied: missing required scope 'tools:execute'"}` exactly; `dev-mock-token` (scope held) → `200`. The real token reproduces the 403 on an unheld scope. |
 | AC-4 | met (was FAIL, remediated) | First run found the `agentshield.security.authz_failure` event carried `tenant_id` and `user_id` but dropped the required permission: `require_permission` passed `missing_scope=required_scope` (`gateway/auth.py:317-323`), but `emit_authz_failure` ignored it. Fix: added an optional top-level `required_permission` to `EventEnvelope`, threaded through `emit_event` and `TelemetryEventEmitter.emit`, set from `missing_scope` in `emit_authz_failure` (`gateway/telemetry.py`); the `data.security` object is unchanged. Re-verified live: the event now reads `tenant_id: tenant_alpha, user_id: user_dev_456, required_permission: tools:execute`. Regression tests fail without the fix: `test_telemetry.py::TestTelemetryEmitter::test_emit_authz_failure`, `test_rbac.py::test_authz_failure_event_records_required_permission`. |
 
 Why the suite was green while AC-4 was unmet: the original `test_rbac_execute_tool_forbidden`
 asserted only that `emit_authz_failure` was *called* with `missing_scope=REQUIRED_SCOPE`, never that
 the emitted event contained it. The two new tests close that: one inspects the emitted envelope
 directly, one drives the real route and inspects the event.
-
-Nothing is ticked; AC-2 blocks the run, so the feature stays unverified until a real Auth0 token is
-available.
 
 ## Commands
 - [x] `pytest gateway/tests/test_rbac.py` → 19 passed (route-level success/403, exact-match scope semantics, 401 auth failures, tenant-binding override, authz telemetry emission) → AC-1, AC-2, AC-3, AC-4
