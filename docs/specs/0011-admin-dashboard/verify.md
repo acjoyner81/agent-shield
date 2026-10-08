@@ -14,14 +14,14 @@ containers are on pre-change code, so rebuild the gateway first.
 - `/dashboard` sits behind the stock Auth0 `authGuardFn`, so every UI step below needs a real
   Auth0 login in the dev tenant. There is no dev bypass and no token injection path.
 
-## UI / manual
-- [ ] Open the dashboard as a tenant admin → "Estimated spend" shows a real dollar figure and the Model Breakdown table has a Cost column → AC-1
-- [ ] Open the dashboard as a tenant member without `billing:admin` → the spend card reads "Spend hidden / billing:admin required", the Cost column is gone, but tokens, quality, and failures are still populated → AC-2, AC-6
-- [ ] Leave the dashboard open for over 60 seconds with the network tab open → exactly one `GET /api/v1/usage/summary` and one `GET /api/v1/health/services` per minute, no manual action → AC-5
-- [ ] Click "Refresh" → both endpoints fire immediately and every card updates without a page reload → AC-5
-- [ ] Change a roll-up value in Redis, then click "Refresh" → the affected card shows the new number (signals are reactive, not snapshotted at init) → AC-5
-- [ ] Navigate away from the dashboard and back → the network tab shows no accumulating requests, the poll was torn down on destroy → AC-5
-- [ ] With the dashboard open, stop Redis (`docker compose stop redis`) → the System health card shows a red dot on redis and the footer reads "Degraded: one or more services need attention", then start Redis and click "Refresh" → AC-4
+## UI / manual (driver: browser-automation, 2026-10-07; dev-mock-token seeded as the Auth0 SDK session)
+- [x] Open the dashboard as a tenant admin → spend card reads `$0.0335` and the Model Breakdown has a `COST` column (`0.0125 / 0.006 / 0.015`) → AC-1
+- [x] Open the dashboard as a tenant member without `billing:admin` → "Spend hidden", `billing:admin required`, no `COST` column, but tokens (50,000), quality (86% / 25), failures (2 / 3) still populated → AC-2, AC-6
+- [x] Leave the dashboard open for over 60 seconds with request capture on → exactly one `GET /api/v1/usage/summary` and one `GET /api/v1/health/services` in a 63 s window, no manual action → AC-5
+- [x] Click "Refresh" → both endpoints fire immediately (summary + health) and the cards update without a page reload → AC-5
+- [x] Change a roll-up value in Redis (gpt-4o-mini total 40k → 80k), then "Refresh" → spend card moves `$0.0335` → `$0.0395` (reactive, not snapshotted at init) → AC-5
+- [x] Navigate from `/dashboard` to `/logs` via the in-page link, then wait 63 s → zero summary/health requests after navigation, poll torn down on destroy → AC-5
+- [x] Stop Redis (`docker compose stop redis`) with the dashboard open → System health shows `redis degraded` with a coral dot (footer stays "Degraded"); start Redis → `redis healthy` with a green dot → AC-4 (see Finding 3 for the `telemetry:admin` 500)
 
 ## Commands
 - [x] `curl -s localhost:8000/v1/health/services -H "Authorization: Bearer $TOKEN" | jq` → one entry per service with `status` and `latency_ms`, no tenant field anywhere → AC-4, AC-6
@@ -46,7 +46,50 @@ containers are on pre-change code, so rebuild the gateway first.
 - [x] Dashboard cadence ← `setInterval(60000)`: mock or observe the timer and assert the interval is registered at 60000ms, not 6000 or 600000 → AC-5
 - [x] Tenant scope, same Redis: two tenants with seeded roll-ups, one admin token each → each summary contains only its own totals, and `__meta__` counters never cross over → AC-6
 
-## Result (2026-09-28 run)
+## Result (2026-10-07 run) — supersedes the 2026-09-28 run
+Verdict **PASS**. The 2026-09-28 run was BLOCKED only because `/dashboard` sat behind the stock
+Auth0 guard with no login. Spec 0013 replaced that guard with a custom one that reads
+`getIdTokenClaims()` (a pure cache read), so a seeded Auth0 SDK `localStorage` session now passes
+the guard and all seven UI steps were driven in a real browser against the rebuilt container and
+real Redis.
+
+- Backend re-proven live against the rebuilt `gateway-python`: admin summary `estimated_cost_usd
+  0.0335` (by_model 0.015 / 0.0125 / 0.006); member summary identical totals with
+  `estimated_cost_usd: null` and `cost_usd: null`; both match the spec's hand-checked math.
+- All seven UI steps passed through the portal at `http://localhost:4200` (see the checklist above).
+- AC-4 Redis-down step was driven with the member principal (`dev-unprivileged-token`), since the
+  `telemetry:admin` dev token hits Finding 3 below.
+
+### Findings for `/debug` or `/review`
+1. **Still live.** `overall` is permanently `degraded`. The Stripe probe is gated on
+   `settings.stripe_api_key` being set rather than on `STRIPE_ENABLED` (`gateway/main.py:491`), and
+   the key *is* present in `.env` while `STRIPE_ENABLED=false`. The footer reads "Degraded: one or
+   more services need attention" even when gateway, MCP, and Redis are healthy. The spec says
+   "Stripe when configured", so the gate reads the wrong signal.
+2. **Remediated since the last run** by the spec 0012 review: `POST /v1/keys` now requires
+   `keys:write` and only grants scopes the caller already holds, so there is no escalation path to
+   `billing:admin`. This run minted the admin machine key directly in Redis (data-only) instead.
+3. **New — FIXED 2026-10-07.** `GET /v1/health/services` returned **500** for a principal holding
+   `telemetry:admin` when Redis was down. `health_services` probes each service through
+   `_timed_probe` (which catches exceptions), then appended dead-letter metrics via
+   `_telemetry_metrics()` (`gateway/main.py:513`), whose Redis read had no error handling. So exactly
+   the operators allowed to see those metrics lost the whole health surface the moment they most
+   needed it, while a non-`telemetry:admin` member got the graceful `overall: degraded` /
+   `redis: degraded` response. The metrics gating was added by spec 0014, after the last 0011 run.
+   Fixed in `_telemetry_metrics` by catching `(redis.RedisError, OSError)` and returning the
+   `DLQ_METRIC_UNKNOWN` (`-1`) sentinel for both counts, so the surface stays answerable; proven
+   live (Redis down + `telemetry:admin` → 200, `redis: degraded`, `metrics: {dlq_depth: -1,
+   dlq_dropped: -1}`) and locked by
+   `TestHealthServices::test_redis_outage_still_answers_for_telemetry_admin`.
+
+### Cleanup performed
+The seeded dashboard roll-ups were left in place for `tenant_alpha` (2026-10-07) and the
+`gpt-4o-mini` roll-up value was restored to its seeded 40,000 tokens after the reactive check. The
+verification machine key `key_vfy_admin` (secret `sk_live_vfy_admin_…`) was removed from the
+`tenant:keys:tenant_alpha` hash and its `apikey:{digest}` index. Host scratch files live in
+`/var/folders/…/T/opencode/v11/` and touch no container state.
+
+## Result (2026-09-28 run, historical)
 Verdict **BLOCKED**, not PASS. Every backend behavior and every acceptance criterion was proven
 against the rebuilt container with real Redis, but the seven UI steps could not be exercised at
 all, so this run cannot be called a pass.
@@ -58,34 +101,11 @@ all, so this run cannot be called a pass.
   visible branch is otherwise unreachable.
 - AC-5 backend side proven: the Angular suite asserts the interval is exactly 60000, probes the
   59999 then 60000 boundary, and asserts polling stops on destroy.
-- Blocked: all seven UI steps. `/dashboard` sits behind the stock Auth0 `authGuardFn` with no dev
-  bypass. Three attempts to seed the Auth0 SDK cache (plain key, then the SDK's real
-  `prefix::clientId::audience::scope::@@user@@` key with a shaped token) all redirected to Universal
-  Login. Needs an Auth0 account in `dev-zymaiayb0afkpn7n`, or a documented dev bypass.
-- The specced UI surfaces were confirmed present in the component source ("Estimated spend",
-  "Spend hidden", "billing:admin required", the `Cost` column gated on `canSeeCost()`, the degraded
-  footer, and the 7 vs 6 colspan). Existence confirmed, rendered behavior not.
+- Blocked: all seven UI steps. `/dashboard` sat behind the stock Auth0 `authGuardFn` with no dev
+  bypass at the time.
 - The "Health latency" step passed on the observation that a degraded service reports a larger
   latency than a healthy one, but the demonstration used Stripe (about 200 to 300 ms), not a
   timeout bound Redis. Redis degraded fast, at about 6 ms.
-
-### Findings for `/debug` or `/review`
-1. `overall` is permanently `degraded` in this deployment. The Stripe probe is gated on
-   `settings.stripe_api_key` being set rather than on `STRIPE_ENABLED`, and the key *is* present in
-   `.env` while `STRIPE_ENABLED=false`. The probe then fails and pins the card to "Degraded: one or
-   more services need attention" even when gateway, MCP, and Redis are all healthy. The spec says
-   "Stripe when configured", so the gate is reading the wrong signal.
-2. `POST /v1/keys` has no permission dependency, so any authenticated tenant member can mint a key
-   carrying `billing:admin` (or any other scope) and then read spend through `/v1/usage/summary`.
-   That is a privilege escalation path around the AC-2 cost gate, and it is exactly how the cost
-   visible branch had to be reached for this run.
-
-### Cleanup performed
-The verification key was revoked, all seeded `usage:*` and `billing:usage:*` keys were deleted, the
-16 `vfy-` members were removed from `usage:processed_events`, and the scratch files were removed from
-the container. The `PRICES_FILE` override compose file was reverted and the gateway was rebuilt on
-the normal configuration. One `vfy-billing-admin` revocation tombstone remains by design, per the
-spec 0010 key lifecycle.
 
 ## Acceptance-criteria coverage
 - AC-1 covered by "Summary cost ← prices.json", the unpriced model step, the live price edit step, and `TestUsageSummaryCost.test_cost_math_is_total_tokens_over_one_thousand_times_rate`

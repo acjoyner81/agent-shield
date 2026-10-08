@@ -177,7 +177,7 @@ Spec 0009 · `docs/specs/0009-usage-metering-engine/index.md` · code in `gatewa
 
 ## Slice 4: Tenant Experience
 
-### 9. Admin Dashboard · in-progress
+### 9. Admin Dashboard · in-progress (verified)
 Create Angular components for the portal to display daily token consumption and estimated costs.
 **Done when:** a tenant admin can see their usage metrics on the dashboard.
 - [x] Design it (spec): `/architect admin dashboard` → Spec 0011
@@ -188,7 +188,7 @@ Create Angular components for the portal to display daily token consumption and 
    - [x] Add `/v1/health/services` with a probe per service
    - [x] Wire the dashboard cards to live values on a 60s poll
    - [x] Cover cost, role gate, tenant scope, and probes with tests
-- [ ] Verify it: `/check verify admin dashboard` — run 2026-09-28, verdict BLOCKED. All backend criteria (AC-1, AC-2, AC-3, AC-4, AC-6) proven live; the seven UI steps need an Auth0 login, since `/dashboard` is behind the stock `authGuardFn` with no dev bypass. Two findings recorded in `verify.md`.
+- [x] Verify it: `/check verify admin dashboard` — run 2026-10-07, verdict **PASS**. The prior run's blocker is gone: the spec 0013 custom guard reads the Auth0 SDK cache, so all seven UI steps were driven through the browser at `http://localhost:4200`. AC-1…AC-6 all proven. Three findings in `verify.md`: the Stripe probe gate still pins `overall` degraded (Finding 1, open), the old key-escalation path is remediated (Finding 2, closed), and `GET /v1/health/services` 500'd for a `telemetry:admin` principal when Redis was down — a spec 0014 regression in `_telemetry_metrics`, fixed 2026-10-07 with a regression test (Finding 3, closed).
 - [x] Test it: `/test admin dashboard` — `dashboard.component.spec.ts` covers the live cards, the cost role gate, and the manual refresh. Tick synced 2026-10-02; the timer specs moved to `app.spec.ts` when the shell took the poll.
 Spec 0011 · `docs/specs/0011-admin-dashboard/index.md` · code in `gateway/pricing.py`, `gateway/metering.py`, `gateway/main.py`, `portal-frontend/src/app/features/dashboard/`
 
