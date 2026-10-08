@@ -114,7 +114,7 @@ Implement gateway level access control to restrict MCP tool execution based on t
    - [x] Build the `require_permission` dependency factory
    - [x] Wire 403 responses and authz telemetry
    - [x] Secure `/v1/tools/execute` as the tracer bullet
-- [ ] Verify it: `/check verify rbac enforcement` — record exists at `docs/specs/0005-rbac-enforcement/verify.md` (2026-09-23) and every step in it is ticked, but it is STALE and must be re run. It predates `c1c4fa3` (2026-10-02), which namespaced the Auth0 permissions claim because the bare `permissions` name collided with a reserved claim and was silently dropped. That build could not read a real user's permissions at all, so AC-2 was proven only against synthetic tokens. RBAC was later confirmed working for a real browser session by hand (201 on `POST /v1/keys`), which is not the same as a verify run.
+- [ ] Verify it: `/check verify rbac enforcement` — re-run 2026-10-08. AC-1 and AC-3 pass live; AC-4 was found failing (the `authz_failure` event dropped the required permission) and **fixed** — the event now carries `required_permission` beside `user_id`/`tenant_id`, with regression tests that fail without the fix. AC-2 remains **blocked**: no real Auth0 access token or management credentials exist here, so the namespaced claim read is proven only against the DEV stand-in. Details in `docs/specs/0005-rbac-enforcement/verify.md`. Next: supply a real token to close AC-2, then re-run `/check verify rbac enforcement`.
 - [ ] Test it: `/test rbac enforcement`
 - [ ] Document it: `/document rbac enforcement`
 Spec 0005 · code in `gateway/main.py`
