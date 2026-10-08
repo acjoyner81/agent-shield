@@ -86,6 +86,7 @@ class EventEnvelope(BaseModel):
     type: str
     tenant_id: str
     user_id: Optional[str] = None
+    required_permission: Optional[str] = None
     trace_id: Optional[str] = None
     span_id: Optional[str] = None
     data: Dict[str, Any] = Field(default_factory=dict)
@@ -164,6 +165,7 @@ def emit_event(
     event_type: str,
     data: Dict[str, Any],
     user_id: Optional[str] = None,
+    required_permission: Optional[str] = None,
     trace_id: Optional[str] = None,
     span_id: Optional[str] = None,
     source: str = "agentshield-gateway-python",
@@ -175,6 +177,7 @@ def emit_event(
         type=event_type,
         tenant_id=tenant_id,
         user_id=user_id,
+        required_permission=required_permission,
         trace_id=trace_id,
         span_id=span_id,
         data=data,
@@ -223,6 +226,7 @@ class TelemetryEventEmitter:
         event_type: str,
         data: Dict[str, Any],
         user_id: Optional[str] = None,
+        required_permission: Optional[str] = None,
         trace_id: Optional[str] = None,
         span_id: Optional[str] = None,
         source: str = "agentshield-gateway-python",
@@ -233,6 +237,7 @@ class TelemetryEventEmitter:
             event_type=event_type,
             data=data,
             user_id=user_id,
+            required_permission=required_permission,
             trace_id=trace_id,
             span_id=span_id,
             source=source,
@@ -301,6 +306,7 @@ def emit_authz_failure(
         event_type=EventType.AUTHZ_FAILURE.value,
         data=data,
         user_id=user_id,
+        required_permission=missing_scope,
         trace_id=trace_id,
         span_id=span_id,
     )

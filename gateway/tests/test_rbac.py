@@ -189,6 +189,36 @@ def test_rbac_execute_tool_forbidden(_stub_telemetry):
     )
 
 
+def test_authz_failure_event_records_required_permission(_stub_telemetry):
+    """AC-4: the emitted event itself carries the required permission.
+
+    The call-args assertion above passes even when the emitter drops the scope;
+    this drives the real emitter and reads the envelope it would ship.
+    """
+    from gateway import telemetry as telemetry_events
+
+    captured: list = []
+
+    def _emit_and_capture(*args, **kwargs):
+        captured.append(telemetry_events.emit_authz_failure(*args, **kwargs))
+        return captured[-1]
+
+    with patch("gateway.rate_limit.get_redis_client", return_value=None), patch(
+        "gateway.auth.emit_authz_failure", side_effect=_emit_and_capture
+    ):
+        response = client.post(
+            "/v1/tools/execute",
+            headers={"Authorization": "Bearer dev-unprivileged-token"},
+            json={"tool_name": "test_tool", "params": {}},
+        )
+
+    assert response.status_code == 403
+    event = json.loads(captured[0])
+    assert event["tenant_id"] == "tenant_alpha"
+    assert event["user_id"] == "user_dev_456"
+    assert event["required_permission"] == REQUIRED_SCOPE
+
+
 def test_rbac_missing_bearer_rejected():
     """AC-1 (spec 0004): no Authorization header -> HTTP 401, not 403/200/5xx."""
     response = client.post(

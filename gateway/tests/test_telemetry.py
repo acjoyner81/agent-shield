@@ -198,6 +198,9 @@ class TestTelemetryEmitter(unittest.TestCase):
         self.assertFalse(event["data"]["rbac_passed"])
         self.assertEqual(event["data"]["rate_limit_remaining"], 0)
         self.assertFalse(event["data"]["tripwire_flagged"])
+        self.assertEqual(event["user_id"], "usr_123")
+        self.assertEqual(event["tenant_id"], "tenant_alpha")
+        self.assertEqual(event["required_permission"], "tools:execute")
 
     def test_emit_rate_limit_exceeded(self):
         raw = emit_rate_limit_exceeded(
