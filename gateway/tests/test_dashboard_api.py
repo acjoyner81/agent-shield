@@ -16,9 +16,11 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import redis
 from fastapi import Request
 from fastapi.testclient import TestClient
 
+from gateway import main
 from gateway.auth import resolve_active_tenant
 from gateway.main import (
     INTEGRITY_STALE_SECONDS,
@@ -492,6 +494,40 @@ class TestHealthServices:
         assert services["redis"]["status"] == "degraded"
         assert services["gateway"]["status"] == "healthy"
         assert body["overall"] == "degraded"
+
+    def test_redis_outage_still_answers_for_telemetry_admin(self, monkeypatch):
+        """Spec 0014's metrics read must not turn a Redis outage into a 500.
+
+        The dev token holds telemetry:admin, so the response carries the dead
+        letter metrics. When Redis (the thing being probed) is the failure, the
+        metrics read must degrade to the unknown sentinel rather than raise out
+        of the handler, or the one caller allowed to watch the DLQ loses the
+        whole health surface exactly when it matters. Regression for the
+        2026-10-07 verify Finding 3.
+        """
+
+        class _DownClient:
+            async def llen(self, *args, **kwargs):
+                raise redis.exceptions.ConnectionError("Error -2 connecting to redis")
+
+            async def get(self, *args, **kwargs):
+                raise redis.exceptions.ConnectionError("Error -2 connecting to redis")
+
+            async def aclose(self):
+                return None
+
+        monkeypatch.setattr(main.aioredis, "from_url", lambda *a, **k: _DownClient())
+
+        with patch(
+            "gateway.main._probe_redis",
+            new=AsyncMock(side_effect=OSError("connection refused")),
+        ):
+            response = client.get("/v1/health/services", headers=DEV_HEADERS)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["overall"] == "degraded"
+        assert body["metrics"] == {"dlq_depth": -1, "dlq_dropped": -1}
 
     def test_mcp_outage_flips_only_mcp(self):
         with patch("gateway.main._probe_mcp", new=AsyncMock(side_effect=OSError("refused"))):

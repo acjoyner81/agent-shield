@@ -510,13 +510,24 @@ async def health_services(
     return response
 
 
+DLQ_METRIC_UNKNOWN = -1
+
+
 async def _telemetry_metrics() -> dict[str, int]:
-    """Read the dead letter queue's depth and lifetime drop count."""
+    """Read the dead letter queue's depth and lifetime drop count.
+
+    Redis is the thing being probed on this surface, so it can also be the thing
+    that is down. A failed read must not turn the health response into a 500 for
+    the very operators allowed to see these counts: report both as
+    `DLQ_METRIC_UNKNOWN` and let the `redis` probe entry carry the reason.
+    """
     client = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
         depth = int(await client.llen("telemetry:dlq") or 0)
         dropped = int(await client.get("telemetry:dlq:dropped") or 0)
         return {"dlq_depth": depth, "dlq_dropped": dropped}
+    except (redis.RedisError, OSError):
+        return {"dlq_depth": DLQ_METRIC_UNKNOWN, "dlq_dropped": DLQ_METRIC_UNKNOWN}
     finally:
         await client.aclose()
 
