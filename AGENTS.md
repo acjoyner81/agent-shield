@@ -39,7 +39,7 @@ We use a structured workflow to ensure technical consistency:
 - [x] Tripwire initialization fix (Key generation logic)
 - [x] Implemented `/v1/telemetry/logs` (GET/POST) with Splunk HEC integration
 - [x] Implemented `/v1/billing/checkout` (POST mock)
-- [x] Implemented Granular RBAC Enforcement with Auth0 permissions verification (`require_permission` dependency, Spec 0005)
+- [x] Implemented Granular RBAC Enforcement with Auth0 permissions verification (`require_permission` dependency, Spec 0005), verified 2026-10-08 against a real Auth0 access token: the namespaced permissions claim is read, an unheld scope returns 403 with the missing scope named, and the Spec 0005 AC-4 gap is closed so an `authz_failure` event now carries `required_permission` at the top level (it was emitted without it before)
 - [x] Implemented Tenant Token Bucket Rate Limiting & Isolation (`verify_rate_limit` dependency, Spec 0006)
 - [x] Implemented Usage Metering Engine (`/v1/usage/summary`, roll-up aggregation, and DLQ routing, Spec 0009)
 - [x] Comprehensive test suites for proxy routing, guardrails filters, rate limiting, and metering (237 tests passing, hermetic against fakeredis)

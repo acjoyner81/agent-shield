@@ -16,7 +16,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 2 | Redis to Splunk Aggregator | Slice 1 | done |
 | 3 | End to End Flow | Slice 1 | done |
 | 4 | Auth0 Integration | Slice 2 | done |
-| 5 | RBAC Enforcement | Slice 2 | in-progress |
+| 5 | RBAC Enforcement | Slice 2 | done |
 | 6 | Hybrid Stripe Integration | Slice 3 | in-progress |
 | 7 | Tenant Rate Limiting | Slice 3 | done |
 | 8 | Usage Metering | Slice 3 | done |
@@ -30,7 +30,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 16 | Eval Judge for Quality Scoring | Slice 4 | planned |
 | 17 | Stripe Metered Usage Reporting | Slice 3 | planned |
 | 18 | Prompt Tester for Guardrails | Slice 4 | planned |
-| 19 | Java Gateway Core Logic | Slice 5 | planned |
+| 19 | Java Gateway Core Logic | Slice 5 | in-progress |
 
 ## Foundations
 
@@ -105,7 +105,7 @@ Integrate Auth0 for authentication and map JWT claims to tenant roles (tenant ad
 - [ ] Document it: `/document auth0 integration`
 Spec 0004 · code in `gateway/main.py`
 
-### 5. RBAC Enforcement · in-progress (verified) · GA
+### 5. RBAC Enforcement · done (verified) · GA
 Implement gateway level access control to restrict MCP tool execution based on the user role.
 **Done when:** developer roles are blocked from admin tools and tenant admins have full access.
 - [x] Design it (spec): `/architect rbac enforcement`
@@ -115,8 +115,8 @@ Implement gateway level access control to restrict MCP tool execution based on t
    - [x] Wire 403 responses and authz telemetry
    - [x] Secure `/v1/tools/execute` as the tracer bullet
 - [x] Verify it: `/check verify rbac enforcement` — PASS 2026-10-08 against the current build. AC-1/AC-3 enforced live; AC-4 was found failing (the `authz_failure` event dropped the required permission) and fixed with a regression test the emitter now fails without; AC-2 closed against a real Auth0 access token from a Google login (namespaced claim read, `GET /v1/keys` → 200, unheld scope → 403 with the exact detail). Details in `docs/specs/0005-rbac-enforcement/verify.md`.
-- [ ] Test it: `/test rbac enforcement`
-- [ ] Document it: `/document rbac enforcement`
+- [x] Test it: `/test rbac enforcement` — no uncommitted code to test (the AC-4 fix and its regression tests were committed with commit `9704456`). Durable coverage already in place and green: `gateway/tests/test_rbac.py` tags AC-1/AC-2 (`test_rbac_execute_tool_success`), AC-3 (`test_rbac_execute_tool_forbidden`), AC-4 (`test_authz_failure_event_records_required_permission`, plus the emitter unit test in `test_telemetry.py`); 43 passed across `test_rbac.py` + `test_telemetry.py`.
+- [x] Document it: `/document rbac enforcement` — changelog entry written 2026-10-08, starting `CHANGELOG.md` (Keep a Changelog) with an Added line for the enforcement and a Fixed line for the AC-4 permission-on-failure fix (Spec 0005).
 Spec 0005 · code in `gateway/main.py`
 
 ### 14. Unambiguous API Key Prefix · planned · needs a decision
@@ -140,7 +140,7 @@ Implement a base monthly subscription combined with metered billing for tokens a
    - [x] Implement /v1/billing/checkout & /v1/billing/portal endpoints
    - [x] Implement /v1/billing/webhook endpoint with signature verification
 - [x] Verify it: `/check verify hybrid stripe integration`
-- [ ] Test it: `/test hybrid stripe integration`
+- [x] Test it: `/test hybrid stripe integration` — no uncommitted billing code to test (the suite landed 2026-09-28). Ran and traced the existing `gateway/tests/test_billing.py` to spec 0007: 26 passed, now tagged AC-1 (`test_stripe_sdk_is_configured_from_settings`), AC-2 (`TestCacheEntitlement`, `TestGetCachedEntitlement`), AC-3 (`test_checkout_creates_session`, `TestEnsureStripeCustomer`, `TestCheckoutEdgeCases`), AC-4 (`test_portal_returns_url`, `test_portal_no_customer_returns_404`), AC-5 (`TestWebhookSecurityCases`, `TestWebhookPaymentSecurity`, subscription created/deleted). Spec 0007 Follow-up (push metered usage to Stripe) stays open.
 Spec 0007 · `docs/specs/0007-stripe-integration/index.md` · code in `gateway/billing.py`
 
 ### 7. Tenant Rate Limiting · done
@@ -249,20 +249,20 @@ Give the 400 guardrail path a surface that exercises it end to end, so a blocked
 **Done when:** an operator can submit a prompt in the portal, see it blocked by the guardrail with the reason named on screen, and see the telemetry event that followed.
 - [ ] Build it: `/develop prompt tester for guardrails`
 
-### 19. Java Gateway Core Logic · planned · Slice 5
+### 19. Java Gateway Core Logic · in-progress · Slice 5
 
 Implement the Java Spring Boot gateway core logic as a complementary gateway service.
 **Done when:** the Java gateway starts and registers healthy, JWT validation is configured, and it coexists with the Python gateway.
 
-- [ ] Design it (spec): `/architect java gateway core logic`
+- [x] Design it (spec): `/architect java gateway core logic` → Spec 0015
 - [ ] Build it: `/develop java gateway core logic`
-   - [ ] Implement Spring Boot `@SpringBootApplication` entry point
-   - [ ] Configure OAuth2 resource server with JWT decoder and audience/issuer validators
-   - [ ] Implement health check endpoint registering `gateway-java` as healthy
-   - [ ] Ensure tripwire compliance for any file changes in the Java gateway path
-   - [ ] Coordinate with Python gateway telemetry routing
+   - [ ] MCP server: JWT on port 8081, the streamable transport serving `echoTool`, and Python `tools/execute` migrated onto it (umbrella AC-1, AC-4, AC-5)
+   - [ ] Gateway edge: telemetry emitter, routing failure events, and `gateway-java` on the health surface (umbrella AC-1, AC-2, AC-3)
+   - [ ] Thicken: retire `/rpc` and remove the Java request rate limiter (umbrella AC-4, AC-6)
+- [ ] Verify it: `/check verify java gateway core logic`
+- [ ] Test it: `/test java gateway core logic`
 
-Spec 0015 · code in `java-services/gateway-java/`
+Spec 0015 · `docs/specs/0015-java-gateway-core/index.md` · children `0015-java-gateway.md`, `0015-mcp-server.md` · code in `java-services/gateway-java/`, `java-services/mcp-server/`
 
 ## Deferred
 Out of scope for the current build pass, kept so the plan stays honest.
