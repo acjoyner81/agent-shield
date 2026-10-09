@@ -6,10 +6,16 @@ import pytest
 import stripe
 from fastapi.testclient import TestClient
 
+from config.settings import settings
 from gateway.main import app
 from gateway.billing import cache_entitlement, get_cached_entitlement, ensure_stripe_customer, ENTITLEMENT_KEY, ENTITLEMENT_TTL
 
 client = TestClient(app)
+
+
+def test_stripe_sdk_is_configured_from_settings():
+    """AC-1: the Stripe SDK picks up the configured key at import time."""
+    assert stripe.api_key == settings.stripe_api_key
 
 
 @pytest.fixture(autouse=True)
@@ -78,6 +84,7 @@ SUBSCRIPTION_UPDATED_EVENT = {
 @patch("gateway.billing.stripe.checkout.Session.create")
 @patch("gateway.billing.ensure_stripe_customer")
 def test_checkout_creates_session(mock_customer, mock_session_create):
+    """AC-3: checkout returns the Stripe session URL for a valid price."""
     mock_customer.return_value = "cus_123"
     mock_session_create.return_value = type("S", (), {"url": "https://checkout.stripe.com/123", "id": "cs_test"})
 
@@ -94,6 +101,7 @@ def test_checkout_creates_session(mock_customer, mock_session_create):
 
 
 def test_checkout_missing_price_id():
+    """AC-3: a checkout with no price is a 400, not a Stripe call."""
     response = client.post("/v1/billing/checkout", params={}, headers=CLIENT_HEADERS)
     assert response.status_code == 400
     assert response.json()["detail"] == "price_id is required"
@@ -101,6 +109,7 @@ def test_checkout_missing_price_id():
 
 @patch("gateway.billing.stripe.billing_portal.Session.create")
 def test_portal_no_customer_returns_404(mock_portal):
+    """AC-4: a tenant with no Stripe customer gets 404, not a portal session."""
     response = client.post("/v1/billing/portal", headers=CLIENT_HEADERS)
     assert response.status_code == 404
     assert "No Stripe customer" in response.json()["detail"]
@@ -108,6 +117,7 @@ def test_portal_no_customer_returns_404(mock_portal):
 
 @patch("gateway.billing.stripe.billing_portal.Session.create")
 def test_portal_returns_url(mock_portal, fake_redis):
+    """AC-4: portal returns the customer portal URL for a bound tenant."""
     fake_redis.set("tenant:tenant_alpha:stripe_customer_id", "cus_123")
     mock_portal.return_value = type("P", (), {"url": "https://billing.stripe.com/portals/123"})
 
@@ -120,6 +130,7 @@ def test_portal_returns_url(mock_portal, fake_redis):
 @patch("gateway.billing.stripe.Webhook.construct_event")
 @patch("gateway.billing.r.setex")
 def test_webhook_subscription_created_caches_entitlement(mock_setex, mock_construct_event):
+    """AC-5, AC-2: subscription.created writes the Redis entitlement cache with TTL."""
     mock_construct_event.return_value = SUBSCRIPTION_EVENT
 
     response = client.post("/v1/billing/webhook", content=json.dumps(SUBSCRIPTION_EVENT), headers=WEBHOOK_HEADERS)
@@ -132,6 +143,7 @@ def test_webhook_subscription_created_caches_entitlement(mock_setex, mock_constr
 @patch("gateway.billing.stripe.Webhook.construct_event")
 @patch("gateway.billing.r.delete")
 def test_webhook_subscription_deleted_clears_entitlement(mock_delete, mock_construct_event):
+    """AC-5: subscription.deleted clears the cached entitlement."""
     mock_construct_event.return_value = DELETED_EVENT
 
     response = client.post("/v1/billing/webhook", content=json.dumps(DELETED_EVENT), headers=WEBHOOK_HEADERS)
@@ -143,6 +155,7 @@ def test_webhook_subscription_deleted_clears_entitlement(mock_delete, mock_const
 
 @patch("gateway.billing.stripe.Webhook.construct_event")
 def test_webhook_invalid_signature_rejected(mock_construct_event):
+    """AC-5: a failed signature check is rejected 400 before any state change."""
     mock_construct_event.side_effect = stripe.error.SignatureVerificationError("Invalid", "sig")
 
     response = client.post("/v1/billing/webhook", content=b"{}", headers=WEBHOOK_HEADERS)
@@ -152,6 +165,8 @@ def test_webhook_invalid_signature_rejected(mock_construct_event):
 
 
 class TestCacheEntitlement:
+    """AC-2: entitlement cache writes with a 1-hour TTL and an updated_at stamp."""
+
     def test_cache_entitlement_writes_redis(self):
         mock_redis = MagicMock()
         with patch("gateway.billing.r", mock_redis):
@@ -176,6 +191,8 @@ class TestCacheEntitlement:
 
 
 class TestGetCachedEntitlement:
+    """AC-2: entitlements read back, and an absent or empty cache is None."""
+
     def test_get_cached_entitlement_returns_data(self):
         mock_redis = MagicMock()
         mock_redis.get.return_value = json.dumps({"status": "active", "tier": "pro"})
@@ -201,6 +218,8 @@ class TestGetCachedEntitlement:
 
 
 class TestEnsureStripeCustomer:
+    """AC-3: a tenant maps to one Stripe customer, reused and tenant-bound."""
+
     def test_ensure_stripe_customer_returns_existing(self):
         mock_redis = MagicMock()
         mock_redis.get.return_value = "cus_existing"
@@ -225,6 +244,8 @@ class TestEnsureStripeCustomer:
 
 
 class TestCheckoutEdgeCases:
+    """AC-3: checkout surfaces Stripe errors and empty prices as 400."""
+
     def test_checkout_stripe_error_returns_400(self):
         mock_customer = MagicMock(return_value="cus_123")
         with patch("gateway.billing.ensure_stripe_customer", mock_customer), \
@@ -249,6 +270,8 @@ class TestCheckoutEdgeCases:
 
 
 class TestWebhookSecurityCases:
+    """AC-5: webhook handling covers tenant fallback, downgrade, and deletion."""
+
     def test_webhook_missing_signature_header(self):
         with patch("gateway.billing.stripe.Webhook.construct_event") as mock_construct:
             mock_construct.side_effect = stripe.error.SignatureVerificationError("Missing", "sig")
@@ -328,6 +351,8 @@ class TestWebhookSecurityCases:
 
 
 class TestWebhookPaymentSecurity:
+    """AC-5: unknown event types are ignored safely and forged signatures rejected."""
+
     def test_webhook_unexpected_event_type_returns_success(self):
         unexpected_event = {
             "id": "evt_unexpected",
