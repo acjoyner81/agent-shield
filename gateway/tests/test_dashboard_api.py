@@ -539,16 +539,31 @@ class TestHealthServices:
         assert services["mcp-server"]["status"] == "degraded"
         assert services["redis"]["status"] == "healthy"
 
-    def test_stripe_appears_only_when_configured(self):
-        with patch("gateway.main.settings") as mock_settings:
-            mock_settings.stripe_api_key = ""
-            without = client.get("/v1/health/services", headers=DEV_HEADERS).json()
-        assert "stripe" not in {s["name"] for s in without["services"]}
+    def test_stripe_appears_only_when_enabled_and_configured(self):
+        """Spec 0011 Finding 1: a key alone must not turn Stripe on.
 
-        with patch("gateway.main.settings") as mock_settings:
-            mock_settings.stripe_api_key = "sk_test_configured"
-            with_stripe = client.get("/v1/health/services", headers=DEV_HEADERS).json()
-        assert "stripe" in {s["name"] for s in with_stripe["services"]}
+        `STRIPE_ENABLED=false` alongside a test `STRIPE_API_KEY` in `.env` used
+        to append the Stripe probe, which 404s against the test API and pinned
+        `overall` to degraded permanently. The gate is the enabled flag, with a
+        key still required so an enabled-with-no-key misconfig fails loudly.
+        """
+
+        def stripe_names(enabled, api_key):
+            with patch("gateway.main.settings") as mock_settings:
+                mock_settings.stripe_enabled = enabled
+                mock_settings.stripe_api_key = api_key
+                body = client.get("/v1/health/services", headers=DEV_HEADERS).json()
+            return {s["name"] for s in body["services"]}, body["overall"]
+
+        names, overall = stripe_names(False, "sk_test_configured")
+        assert "stripe" not in names
+        assert overall == "healthy"
+
+        names, _ = stripe_names(True, "sk_test_configured")
+        assert "stripe" in names
+
+        names, _ = stripe_names(True, "")
+        assert "stripe" not in names
 
     def test_response_exposes_no_tenant_data(self):
         body = client.get("/v1/health/services", headers=DEV_HEADERS).text

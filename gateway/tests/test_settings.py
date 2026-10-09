@@ -24,6 +24,7 @@ def test_default_values():
 def test_stripe_defaults():
     with patch.dict(os.environ, {"STRIPE_API_KEY": "", "STRIPE_WEBHOOK_SECRET": ""}, clear=False):
         s = Settings()
+    assert s.stripe_enabled is False
     assert s.stripe_api_key == ""
     assert s.stripe_webhook_secret == ""
     assert s.stripe_success_url == "http://localhost:4200/billing/success"
@@ -49,10 +50,15 @@ def test_env_override():
 
 
 def test_env_override_stripe():
-    with patch.dict(os.environ, {"STRIPE_API_KEY": "rk_test_override", "STRIPE_WEBHOOK_SECRET": "whsec_override"}):
+    with patch.dict(os.environ, {
+        "STRIPE_API_KEY": "rk_test_override",
+        "STRIPE_WEBHOOK_SECRET": "whsec_override",
+        "STRIPE_ENABLED": "true",
+    }):
         s = Settings()
     assert s.stripe_api_key == "rk_test_override"
     assert s.stripe_webhook_secret == "whsec_override"
+    assert s.stripe_enabled is True
 
 
 def test_env_override_product_ids():
@@ -93,6 +99,7 @@ def test_tier_map_completeness():
 
 def test_payment_env_vars_present():
     s = Settings()
+    assert hasattr(s, "stripe_enabled")
     assert hasattr(s, "stripe_api_key")
     assert hasattr(s, "stripe_webhook_secret")
     assert hasattr(s, "stripe_success_url")

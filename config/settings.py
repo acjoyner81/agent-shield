@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     api_key_grace_period_seconds: int = 86400
 
     # Stripe Billing & Webhook Configuration
+    # Opt-in switch. A key present in the environment is not the same as Stripe
+    # being on (a test key often ships in a dev `.env`), so the health probe keys
+    # off this flag, not the key, or a disabled Stripe pins the footer degraded.
+    stripe_enabled: bool = False
     stripe_api_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_success_url: str = "http://localhost:4200/billing/success"

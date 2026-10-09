@@ -61,11 +61,18 @@ real Redis.
   `telemetry:admin` dev token hits Finding 3 below.
 
 ### Findings for `/debug` or `/review`
-1. **Still live.** `overall` is permanently `degraded`. The Stripe probe is gated on
+1. **FIXED 2026-10-08.** `overall` was permanently `degraded`. The Stripe probe was gated on
    `settings.stripe_api_key` being set rather than on `STRIPE_ENABLED` (`gateway/main.py:491`), and
-   the key *is* present in `.env` while `STRIPE_ENABLED=false`. The footer reads "Degraded: one or
-   more services need attention" even when gateway, MCP, and Redis are healthy. The spec says
-   "Stripe when configured", so the gate reads the wrong signal.
+   the key *is* present in `.env` while `STRIPE_ENABLED=false`. The footer read "Degraded: one or
+   more services need attention" even when gateway, MCP, and Redis were healthy. The spec says
+   "Stripe when configured", so the gate read the wrong signal. `Settings` had no `stripe_enabled`
+   field at all, so the documented `STRIPE_ENABLED` env var was inert. Added
+   `stripe_enabled: bool = False` to `config/settings.py` and gated the probe on
+   `settings.stripe_enabled and settings.stripe_api_key` (the enabled flag is the switch, the key
+   is still required so an enabled-with-no-key misconfig fails loudly). Locked by
+   `TestHealthServices::test_stripe_appears_only_when_enabled_and_configured` (disabled + key →
+   no Stripe entry, `overall: healthy`; enabled + key → present; enabled + no key → absent) and the
+   `stripe_enabled` assertions in `gateway/tests/test_settings.py`.
 2. **Remediated since the last run** by the spec 0012 review: `POST /v1/keys` now requires
    `keys:write` and only grants scopes the caller already holds, so there is no escalation path to
    `billing:admin`. This run minted the admin machine key directly in Redis (data-only) instead.

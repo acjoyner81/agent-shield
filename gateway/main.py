@@ -488,7 +488,7 @@ async def health_services(
         ("file-integrity", _probe_file_integrity),
         ("splunk", _probe_splunk),
     ]
-    if settings.stripe_api_key:
+    if settings.stripe_enabled and settings.stripe_api_key:
         probes.append(("stripe", _probe_stripe))
 
     services = [await _timed_probe(name, probe) for name, probe in probes]
