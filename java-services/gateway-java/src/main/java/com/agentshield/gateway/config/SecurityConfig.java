@@ -1,5 +1,7 @@
 package com.agentshield.gateway.config;
 
+import com.agentshield.gateway.telemetry.EdgeAuthenticationEntryPoint;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,13 +25,19 @@ public class SecurityConfig {
     private String issuer;
 
     @Bean
-    SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
+    SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http,
+            EdgeAuthenticationEntryPoint authenticationEntryPoint) {
         return http
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchange -> exchange
-                        .pathMatchers("/actuator/health", "/public/**", "/health").permitAll()
+                        // G-AC-1: issuer and audience are verified on every request
+                        // except the two health endpoints. No principal header is
+                        // ever added for a downstream service to trust.
+                        .pathMatchers("/actuator/health", "/health").permitAll()
                         .anyExchange().authenticated())
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtDecoder(jwtDecoder())))
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .jwt(jwt -> jwt.jwtDecoder(jwtDecoder())))
                 .build();
     }
 

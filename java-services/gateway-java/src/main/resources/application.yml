@@ -14,27 +14,25 @@ spring:
     gateway:
       routes:
         - id: portal-frontend-api
-          uri: http://gateway-python:8000
+          uri: ${PYTHON_GATEWAY_URL:http://gateway-python:8000}
           predicates:
             - Path=/api/v1/**
 
+        # No RequestRateLimiter here on purpose (G-AC-2). Python owns the single
+        # tenant token bucket, so a request that Python would throttle returns
+        # Python's 429 unchanged and the edge never enforces a second budget.
         - id: fastapi-llm-proxy
-          uri: http://gateway-python:8000
+          uri: ${PYTHON_GATEWAY_URL:http://gateway-python:8000}
           predicates:
             - Path=/v1/chat/**
-          filters:
-            - name: RequestRateLimiter
-              args:
-                redis-rate-limiter.replenishRate: 20
-                redis-rate-limiter.burstCapacity: 40
 
         - id: spring-ai-mcp-tools
-          uri: http://mcp-server:8081
+          uri: ${MCP_SERVER_URL:http://mcp-server:8081}
           predicates:
             - Path=/mcp/**
 
         - id: angular-dev-server
-          uri: http://portal-frontend:80
+          uri: ${PORTAL_FRONTEND_URL:http://portal-frontend:80}
           predicates:
             - Path=/**
   data:

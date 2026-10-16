@@ -14,7 +14,7 @@ factory) → `get_verified_tenant` (tenant + permission binding) → `verify_jwt
 import hashlib
 import json
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import Depends, FastAPI, HTTPException
@@ -146,17 +146,10 @@ def test_rbac_execute_tool_success(_stub_telemetry):
     Exercises the real chain: verify_jwt -> get_verified_tenant (binds
     tenant_id + permissions) -> require_permission pass -> MCP forward.
     """
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"result": "success_output"}
-    mock_response.raise_for_status = lambda: None
-
-    mock_client_instance = MagicMock()
-    mock_client_instance.post = AsyncMock(return_value=mock_response)
-    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-    mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-
-    with patch("gateway.main.httpx.AsyncClient", return_value=mock_client_instance):
+    with patch(
+        "gateway.main.call_mcp_tool",
+        AsyncMock(return_value={"content": [{"type": "text", "text": "success_output"}]}),
+    ):
         response = client.post(
             "/v1/tools/execute",
             headers={"Authorization": "Bearer dev-mock-token"},
@@ -397,16 +390,10 @@ def _seed_api_key(secret, permissions, tenant="tenant_rbac"):
 
 
 def _mcp_success():
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"result": "tool_output"}
-    mock_response.raise_for_status = lambda: None
-
-    mock_client_instance = MagicMock()
-    mock_client_instance.post = AsyncMock(return_value=mock_response)
-    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-    mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-    return patch("gateway.main.httpx.AsyncClient", return_value=mock_client_instance)
+    return patch(
+        "gateway.main.call_mcp_tool",
+        AsyncMock(return_value={"content": [{"type": "text", "text": "tool_output"}]}),
+    )
 
 
 def test_machine_key_with_scope_executes(_stub_telemetry):

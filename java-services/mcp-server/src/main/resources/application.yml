@@ -8,17 +8,15 @@ spring:
       server:
         name: agentshield-mcp-server
         version: 0.1.0-SNAPSHOT
-        webflux:
-          base-path: /mcp/v1
-  cloud:
-    gateway:
-      routes:
-        - id: fastapi-chat-route
-          uri: http://localhost:${wiremock.server.port:8000}
-          predicates:
-            - Path=/v1/chat/completions
-          filters:
-            - StripPrefix=2
+        protocol: STREAMABLE
+        streamable-http:
+          mcp-endpoint: /mcp/v1
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI:https://dev-zymaiayb0afkpn7n.us.auth0.com/}
+          audiences: ${SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES:https://api.agentshield.local}
 server:
   port: 8081
 

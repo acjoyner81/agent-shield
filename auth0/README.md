@@ -11,6 +11,7 @@ do not edit it only in the dashboard.
 | File | Trigger | What it does |
 | --- | --- | --- |
 | `actions/add-tenant-claims.js` | Post-Login | Stamps `https://api.agentshield.local/tenant_id` and `https://api.agentshield.local/permissions` onto the ID and access tokens |
+| `actions/add-m2m-tenant-claims.js` | Machine To Machine / Client Credentials Exchange | The same claims for machine to machine tokens, read from `event.client.metadata` (Post-Login does not run for the client credentials grant) |
 
 ### Why it is required
 
@@ -27,6 +28,16 @@ before you remove it:
   re-authentication, so the app correctly declines to send the user back to Auth0.
 - The user is therefore stuck on "Permission denied" with no way to recover by
   signing in again. Only seeding `app_metadata` and re-authenticating fixes it.
+
+### Machine to machine tokens
+
+The client credentials grant does not run Post-Login, so an M2M token needs its
+own Action on the **Client Credentials Exchange** trigger
+(`actions/add-m2m-tenant-claims.js`). Two things bite here: the event property is
+`event.client.metadata` (not `client_metadata`), and a claim under the reserved
+bare name `permissions` is dropped silently, exactly as on the Post-Login path.
+The Action falls back to `tenant_alpha` so the development tenant always gets a
+usable token.
 
 ### Install
 

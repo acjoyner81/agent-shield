@@ -15,7 +15,7 @@ import hashlib
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -157,16 +157,10 @@ def stub_telemetry():
 
 
 def _mock_mcp():
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"result": "tool_output"}
-    mock_response.raise_for_status = lambda: None
-
-    mock_client_instance = MagicMock()
-    mock_client_instance.post = AsyncMock(return_value=mock_response)
-    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-    mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-    return patch("gateway.main.httpx.AsyncClient", return_value=mock_client_instance)
+    return patch(
+        "gateway.main.call_mcp_tool",
+        AsyncMock(return_value={"content": [{"type": "text", "text": "tool_output"}]}),
+    )
 
 
 def _create_key(name="app key", permissions=None):

@@ -1,7 +1,7 @@
 # 0015.1. Java Gateway Core. gateway-java
 
 **Date**: 2026-10-07
-**Status**: Proposed
+**Status**: Verified (2026-10-16)
 **Parent decision**: 0015 Java Gateway Core
 
 ## Summary
@@ -50,14 +50,16 @@ Today gateway-java already authenticates (issuer and audience in SecurityConfig)
 
 - Stream: `telemetry:queue` on the same Redis the aggregator reads.
 - Envelope: the 0008 CloudEvents shape from `gateway/telemetry.py`, with `source` set to `agentshield-gateway-java`.
-- Emitter: a reactive Redis `XADD` via Lettuce, `MAXLEN ~` like the Python emitter. Append only, no reader side.
-- Types: auth rejections use `agentshield.security.authz_failure`; routing failures use `agentshield.telemetry.request.completed`.
+- Emitter: a reactive Redis `XADD` via Lettuce, `MAXLEN ~` like the Python emitter, matching the Python `QUEUE_MAXLEN`. Append only, no reader side. Emission is best effort and fire and forget: on an emitter error the edge WARN logs the event type and never blocks or changes the auth or routing outcome, and a Redis total outage loses edge events, which is accepted.
+- Types: auth rejections use `agentshield.security.authz_failure`; routing failures use `agentshield.telemetry.request.completed`. A routing failure event is emitted only when Python produced no response at all: no route matched yields 404, a downstream connect or read failure yields 502 or 504. For any request Python answered, Python owns the single `request.completed` event and the edge emits nothing.
 
 **Security model**
 
 - Every non public route requires a valid JWT against issuer `https://dev-zymaiayb0afkpn7n.us.auth0.com/` and audience `https://api.agentshield.local`. The token is verified again at Python; double verification is intended defense in depth.
-- The edge never emits a scope decision and never forwards credentials downstream; it forwards the original `Authorization` header so Python can verify.
-- The JwtAuthenticationConverter is configured to read the tenant from the same claim Python reads (`tenant_id` under the Auth0 namespace), only to tag telemetry.
+- The edge never emits a scope decision and never forwards credentials downstream; it forwards the original `Authorization` header unchanged so Python can verify.
+- The proxied path never injects `X-User-ID`, `X-Tenant-ID`, or role headers; a header is never a principal on this platform.
+- For a served request the JwtAuthenticationConverter reads the tenant from the same claim Python reads (`tenant_id` under the Auth0 namespace), only to tag telemetry.
+- On a rejection the JWT is not available (Spring hands back no `Jwt` on failure), so the edge does a best effort unverified read of the bearer payload: split on dots, ignore the signature, look for the same `tenant_id` claim, default to `unknown` on a malformed or missing token. That read is telemetry only and is never used for authorization.
 
 **Config**
 
@@ -87,19 +89,20 @@ Build approach: Tracer Bullet. The thinnest end to end thread is an edge auth re
 
 **Slice 2, routing failure events (builds G-AC-4)**
 
-- A small global filter writes `telemetry:queue` only when no route matched or the downstream status is 502/504, including latency.
+- A small global filter writes `telemetry:queue` only when no route matched or the downstream status is 502/504, including latency. Latency is measured at the edge filter; the tenant for the event comes from the validated JWT when auth already passed, else the same best effort read, `unknown` on any failure.
 - Tests: a bad host returns 404 and emits one event; duplicate emission is excluded for served responses.
 
 **Slice 3, health surface (builds G-AC-5, G-AC-6, umbrella AC-3)**
 
-- Add a plain JSON `/health` controller.
+- Add a plain JSON `/health` controller returning `{"status":"UP"}`; `/actuator/health` stays the probe source and the Python probe timeout stays the 2s default.
 - Add `gateway-java` to the Python `GET /v1/health/services` probe list at `http://gateway-java:8080/actuator/health`.
 - Tests: `GET /v1/health/services` includes `gateway-java` healthy; stopping the gateway container flips it to unhealthy; gateway health stays green while Python is stopped.
 
 **Slice 4, rate limiter removal (builds G-AC-2, umbrella AC-6)**
 
 - Strip the RequestRateLimiter filter and the limiter options from the `RouteLocator`; keep Redis for the actuator indicator.
-- Tests: a tenant throttled by the Python token bucket gets the same 429 envelope through gateway-java as directly into Python; no independent limiter window exists.
+- Only `/v1/chat/**` carried the RequestRateLimiter; removal touches that route alone and adds no other rate limiting filter.
+- Tests: a tenant throttled by the Python token bucket gets the same 429 envelope through gateway-java as directly into Python; the 429 body and headers pass through unmodified; no independent limiter window exists.
 
 ## Migration plan
 
@@ -113,5 +116,6 @@ No path cutover for served traffic: the telemetry, health, and routing work is a
 
 ## Follow-up
 
-- [ ] Python probe test coverage for the new `gateway-java` entry lands with Slice 3.
-- [ ] The Spring AI streamable path suffixes get pinned in the parent spec once develop measures them (shared follow up).
+- [x] Python probe test coverage for the new `gateway-java` entry lands with Slice 3. Covered by `gateway/tests/test_dashboard_api.py` (present in the service set, `degraded` on probe failure).
+- [x] The Spring AI streamable path suffixes get pinned in the parent spec once develop measures them (shared follow up). Measured: the single mounted path is `/mcp/v1` (resolved in `0015-mcp-server.md`).
+- [ ] Bound the downstream connect failure. Verify on 2026-10-16 measured a routing failure to a stopped `gateway-python` at ~30s before the edge returned 504 — the connect surfaced as a timeout rather than a fast refusal, so an unreachable downstream blocks an edge thread for the full default. Decide whether an explicit connect timeout should bring this in line with the 2s probe window.

@@ -1,7 +1,7 @@
 # 0015. Java Gateway Core (gateway-java and mcp-server)
 
 **Date**: 2026-10-07
-**Status**: Proposed
+**Status**: Verified (2026-10-16)
 
 ## Summary
 
@@ -43,7 +43,7 @@ These rules hold across both children and bind the slices together.
 
 **Health**. mcp-server is already probed by Python at `http://mcp-server:8081/health`. gateway-java must register on the same health surface under the name `gateway-java`, probed at `http://gateway-java:8080/actuator/health`.
 
-**MCP path**. Both consumers of the MCP protocol (the gateway route and Python `tools/execute`) call the Spring AI streamable transport mounted under the configured base path `/mcp/v1`. The gateway route `/mcp/**` already forwards to `mcp-server:8081` and continues to do so. The exact message and sse path suffixes for the starter version in the pom (1.0.0-M7) get confirmed during develop against the running server; the contract here is that every client uses the streamable endpoint and none uses `/rpc`.
+**MCP path**. Both consumers of the MCP protocol (the gateway route and Python `tools/execute`) call the Spring AI streamable transport mounted at `/mcp/v1`. The gateway route `/mcp/**` already forwards to `mcp-server:8081` and continues to do so. The mounted path was measured on the 1.1.x line: `spring.ai.mcp.server.protocol: STREAMABLE` with `spring.ai.mcp.server.streamable-http.mcp-endpoint: /mcp/v1`, confirmed against the running server by `StreamableMcpTransportTests`. Every client uses the streamable endpoint and none uses `/rpc`.
 
 ## Decision
 
@@ -74,7 +74,7 @@ The build approach is Tracer Bullet: stand up the thinnest end to end threads fi
 
 **Rollback**: each phase is one commit behind the stack's normal rebuild. Cutting over Python is the only behavioral switch; revert it and `/rpc` still serves.
 
-**Risks**: the Spring AI 1.0.0-M7 starter may expose path suffixes that differ from this spec's expectation; develop confirms them against the running container before the Python cut over.
+**Risks**: the Spring AI line that serves streamable HTTP mounts one endpoint for both stream and messages and demands an initialize handshake with a session header; develop confirms the mounted path and the session flow against the running container before the Python cut over.
 
 ## Consequences
 
@@ -93,7 +93,7 @@ The build approach is Tracer Bullet: stand up the thinnest end to end threads fi
 
 ## Follow-up
 
-- [ ] The Spring AI starter mount path suffixes get pinned in this spec once develop measures them against 1.0.0-M7.
+- [x] The Spring AI streamable mount path gets pinned in this spec once develop measures it against the upgraded 1.1.x line. Measured: `/mcp/v1` (see **MCP path** above).
 - [ ] The Java services have no project workflow spec of their own; consider whether spring boot conventions belong in a nested `java-services/AGENTS.md` once the build lands.
 
 ## Rationale

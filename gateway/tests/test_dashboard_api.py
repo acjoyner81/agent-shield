@@ -464,9 +464,11 @@ class TestHealthServices:
         # dead letter counts are read over Redis.
         with patch("gateway.main._probe_redis", new=AsyncMock()), patch(
             "gateway.main._probe_mcp", new=AsyncMock()
-        ), patch("gateway.main._probe_stripe", new=AsyncMock()), patch(
-            "gateway.main._probe_file_integrity", new=AsyncMock()
-        ), patch("gateway.main._probe_splunk", new=AsyncMock()):
+        ), patch("gateway.main._probe_gateway_java", new=AsyncMock()), patch(
+            "gateway.main._probe_stripe", new=AsyncMock()
+        ), patch("gateway.main._probe_file_integrity", new=AsyncMock()), patch(
+            "gateway.main._probe_splunk", new=AsyncMock()
+        ):
             yield
 
     def test_lists_gateway_mcp_and_redis_with_status_and_latency(self):
@@ -474,7 +476,7 @@ class TestHealthServices:
 
         assert response.status_code == 200
         services = {s["name"]: s for s in response.json()["services"]}
-        assert {"gateway", "mcp-server", "redis"} <= set(services)
+        assert {"gateway", "gateway-java", "mcp-server", "redis"} <= set(services)
         for service in services.values():
             assert service["status"] == "healthy"
             assert isinstance(service["latency_ms"], (int, float))
@@ -538,6 +540,19 @@ class TestHealthServices:
 
         assert services["mcp-server"]["status"] == "degraded"
         assert services["redis"]["status"] == "healthy"
+
+    def test_gateway_java_outage_flips_only_gateway_java(self):
+        with patch(
+            "gateway.main._probe_gateway_java", new=AsyncMock(side_effect=OSError("refused"))
+        ):
+            services = {
+                s["name"]: s
+                for s in client.get("/v1/health/services", headers=DEV_HEADERS).json()["services"]
+            }
+
+        assert services["gateway-java"]["status"] == "degraded"
+        assert services["gateway"]["status"] == "healthy"
+        assert services["mcp-server"]["status"] == "healthy"
 
     def test_stripe_appears_only_when_enabled_and_configured(self):
         """Spec 0011 Finding 1: a key alone must not turn Stripe on.

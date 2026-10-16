@@ -10,7 +10,7 @@ here runs against a seeded in-process key store, not a mock of one.
 import hashlib
 import json
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -49,18 +49,11 @@ def _stub_quota():
 @pytest.fixture(autouse=True)
 def _stub_mcp():
     """A deterministic MCP tool response, so tool execution never leaves the process."""
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"result": "tool_output"}
-    mock_response.raise_for_status = lambda: None
-
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(return_value=mock_response)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-
-    with patch("gateway.main.httpx.AsyncClient", return_value=mock_client):
-        yield mock_client
+    with patch(
+        "gateway.main.call_mcp_tool",
+        AsyncMock(return_value={"content": [{"type": "text", "text": "tool_output"}]}),
+    ) as mcp:
+        yield mcp
 
 
 def seed_key(

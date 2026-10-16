@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict
 
 from config.settings import settings
 from gateway.auth import verify_jwt, resolve_active_tenant, require_permission
+from gateway.middleware import TelemetryMiddleware
 from gateway.rate_limit import verify_rate_limit
 from gateway.pricing import estimate_cost_usd
 from gateway.telemetry import (
@@ -31,6 +32,12 @@ from gateway.billing import router as billing_router
 from gateway.metering import router as metering_router
 from gateway.dependencies import verify_tenant_quota
 from gateway.keys import router as keys_router
+from gateway.mcp_client import (
+    McpConfigurationError,
+    McpToolError,
+    call_mcp_tool,
+    tool_result_text,
+)
 from config.guardrails.scanner import scan_prompt_injection
 
 API_DESCRIPTION = """
@@ -67,6 +74,11 @@ app = FastAPI(
     openapi_url="/openapi.json",
     docs_url="/docs",
 )
+
+# One request.completed event per served request, attributed to the tenant the
+# auth dependencies resolved. Registered here rather than on a route so a route
+# added later cannot forget it. Ordering is irrelevant: it wraps the whole app.
+app.add_middleware(TelemetryMiddleware)
 
 logger = logging.getLogger("agentshield.gateway")
 
@@ -177,6 +189,7 @@ async def health() -> dict[str, str]:
 
 
 MCP_HEALTH_URL = os.getenv("MCP_HEALTH_URL", "http://mcp-server:8081/health")
+GATEWAY_JAVA_HEALTH_URL = os.getenv("GATEWAY_JAVA_HEALTH_URL", "http://gateway-java:8080/actuator/health")
 STRIPE_API_URL = "https://api.stripe.com/v1/"
 PROBE_TIMEOUT_SECONDS = 2.0
 
@@ -192,6 +205,12 @@ async def _probe_redis() -> None:
 async def _probe_mcp() -> None:
     async with httpx.AsyncClient() as client:
         response = await client.get(MCP_HEALTH_URL, timeout=PROBE_TIMEOUT_SECONDS)
+        response.raise_for_status()
+
+
+async def _probe_gateway_java() -> None:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(GATEWAY_JAVA_HEALTH_URL, timeout=PROBE_TIMEOUT_SECONDS)
         response.raise_for_status()
 
 
@@ -483,6 +502,7 @@ async def health_services(
     """
     probes = [
         ("gateway", _probe_gateway),
+        ("gateway-java", _probe_gateway_java),
         ("mcp-server", _probe_mcp),
         ("redis", _probe_redis),
         ("file-integrity", _probe_file_integrity),
@@ -731,74 +751,50 @@ async def execute_tool(
     """
     Invoke a tool registered on the MCP server on behalf of the authenticated tenant.
 
-    Requires the `tools:execute` scope. A principal without it receives `403` and an
-    authz failure event is emitted to telemetry. The W3C `traceparent` header is
-    forwarded to the MCP server and echoed back as `trace_id`.
+    The endpoint calls the standard MCP streamable transport. Requires the `tools:execute` scope.
+    A principal without it receives `403` and an authz failure event is emitted
+    to telemetry. The W3C `traceparent` header is forwarded to the MCP server and
+    echoed back as `trace_id`.
     """
     trace_id = traceparent.split("-")[1] if "-" in traceparent else "unknown"
     user_id = getattr(request.state, "user_id", "unknown")
+    span_id = trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown"
 
-    mcp_url = "http://mcp-server:8081/rpc"
-    rpc_payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {"name": payload.tool_name, "arguments": payload.params},
-        "id": 1,
-    }
+    def _emit(status_code: int) -> None:
+        emit_request_completed(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            trace_id=trace_id,
+            span_id=span_id,
+            method="POST",
+            path="/v1/tools/execute",
+            status_code=status_code,
+            latency_ms=0,
+        )
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                mcp_url,
-                json=rpc_payload,
-                headers={"traceparent": traceparent, "X-Tenant-ID": tenant_id},
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            result = response.json()
+        result = await call_mcp_tool(
+            tool_name=payload.tool_name,
+            arguments=payload.params,
+            tenant_id=tenant_id,
+            traceparent=traceparent,
+        )
+    except McpConfigurationError as exc:
+        _emit(503)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except McpToolError as exc:
+        _emit(502)
+        raise HTTPException(status_code=502, detail=f"MCP tool error: {exc.message}") from exc
+    except httpx.HTTPError as exc:
+        _emit(502)
+        raise HTTPException(status_code=502, detail=f"MCP Connection Failed: {exc}") from exc
 
-            # Synchronous call (removed 'await')
-            emit_request_completed(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                trace_id=trace_id,
-                span_id=trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown",
-                method="POST",
-                path="/v1/tools/execute",
-                status_code=200,
-                latency_ms=0,
-            )
-            return {
-                "status": "success",
-                "result": result.get("result"),
-                "trace_id": trace_id,
-            }
-    except httpx.ConnectError as ce:
-        # Synchronous call (removed 'await')
-        emit_request_completed(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            trace_id=trace_id,
-            span_id=trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown",
-            method="POST",
-            path="/v1/tools/execute",
-            status_code=502,
-            latency_ms=0,
-        )
-        raise HTTPException(status_code=502, detail=f"MCP Connection Failed: {str(ce)}")
-    except Exception as e:
-        # Synchronous call (removed 'await')
-        emit_request_completed(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            trace_id=trace_id,
-            span_id=trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown",
-            method="POST",
-            path="/v1/tools/execute",
-            status_code=502,
-            latency_ms=0,
-        )
-        raise e
+    _emit(200)
+    return {
+        "status": "success",
+        "result": tool_result_text(result),
+        "trace_id": trace_id,
+    }
 
 def _audit_event_id(item: dict, raw: str) -> str:
     """A short, stable id for an audit row.

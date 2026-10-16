@@ -37,6 +37,10 @@ services:
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-dev-zymaiayb0afkpn7n.us.auth0.com}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.agentshield.local}
       AUTH0_ISSUER: ${AUTH0_ISSUER:-https://dev-zymaiayb0afkpn7n.us.auth0.com/}
+      # Machine-to-machine credentials the gateway uses to call mcp-server over
+      # the streamable MCP transport. The caller's JWT is never forwarded there.
+      AUTH0_M2M_CLIENT_ID: ${AUTH0_M2M_CLIENT_ID:-}
+      AUTH0_M2M_CLIENT_SECRET: ${AUTH0_M2M_CLIENT_SECRET:-}
       DEV_MODE: "${DEV_MODE:-false}"
       STRIPE_API_KEY: ${STRIPE_API_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
@@ -73,6 +77,8 @@ services:
       - "8081:8081"
     environment:
       SPRING_DATA_REDIS_HOST: redis
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: ${AUTH0_ISSUER:-https://dev-zymaiayb0afkpn7n.us.auth0.com/}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES: ${AUTH0_AUDIENCE:-https://api.agentshield.local}
     depends_on:
       redis:
         condition: service_healthy

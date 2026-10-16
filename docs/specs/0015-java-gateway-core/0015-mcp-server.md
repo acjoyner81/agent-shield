@@ -1,7 +1,7 @@
 # 0015.2. Java Gateway Core. mcp-server
 
 **Date**: 2026-10-07
-**Status**: Proposed
+**Status**: Verified (2026-10-16)
 **Parent decision**: 0015 Java Gateway Core
 
 ## Summary
@@ -10,7 +10,7 @@ mcp-server speaks the MCP protocol the way AI agents expect it: a streamable HTT
 
 ## Context
 
-mcp-server already depends on `spring-ai-starter-mcp-server-webflux` 1.0.0-M7 and configures a base path of `/mcp/v1`, but the actual protocol surface is a hand rolled `McpRpcController` at `/rpc` that understands a private `tools/call` shape. Python `POST /v1/tools/execute` posts to that `/rpc`, passing tenant headers and traceparent. Spring AI exposes `HealthController` at `/health`, which Python probes for the health surface. The service also carries a stray spring cloud gateway route block in application.yml and a stray MCP client starter in the pom, leftovers that this spec cleans up.
+mcp-server carries the `spring-ai-starter-mcp-server-webflux` starter pinned to the 1.1.x line that actually serves the streamable HTTP transport (the pom's earlier M7 line only served the SSE transport). The protocol is configured under `/mcp/v1`, but the actual surface served today is a hand rolled `McpRpcController` at `/rpc` that understands a private `tools/call` shape. Python `POST /v1/tools/execute` posts to that `/rpc`, passing tenant headers and traceparent. Spring AI exposes `HealthController` at `/health`, which Python probes for the health surface. The service also carries a stray spring cloud gateway route block in application.yml and a stray MCP client starter in the pom, leftovers that this spec cleans up.
 
 ## Requirements
 
@@ -38,10 +38,9 @@ mcp-server already depends on `spring-ai-starter-mcp-server-webflux` 1.0.0-M7 an
 | Path | Purpose | Auth requirement |
 |---|---|---|
 | `/health`, `/actuator/health` | liveness and readiness | public |
-| `/mcp/v1` streamable POST | `tools/list`, `tools/call`, initialize handshake | bearer, verified |
-| `/mcp/v1` SSE GET | streaming event channel for the transport | bearer, verified |
+| `/mcp/v1` streamable endpoint (POST and GET on one path) | `tools/list`, `tools/call`, initialize handshake, event stream | bearer, verified |
 
-(gateway-java `/mcp/**` continues to forward to `mcp-server:8081`; the streamable path suffixes for starter 1.0.0-M7 get confirmed during develop and pinned in the parent spec.)
+(gateway-java `/mcp/**` continues to forward to `mcp-server:8081`; the single mounted path for the 1.1.x line gets confirmed during develop and pinned in the parent spec.)
 
 **Value sourcing**
 
@@ -61,10 +60,13 @@ mcp-server already depends on `spring-ai-starter-mcp-server-webflux` 1.0.0-M7 an
 
 | Name | Current | After |
 |---|---|---|
-| `spring.ai.mcp.server.name`, base path `/mcp/v1` | set in application.yml | unchanged |
+| `spring.ai.mcp.server.name` and the streamable protocol | set in application.yml | `protocol: STREAMABLE` with the mcp endpoint mounted under `/mcp/v1` (1.1.x line) |
 | JWT issuer/audience env | absent on the mcp-server service | added to compose (same values as gateway-java) |
+| MCP client credentials | absent on gateway-python | `AUTH0_M2M_CLIENT_ID` and `AUTH0_M2M_CLIENT_SECRET` added to compose, minting a cached token |
 | spring cloud gateway routes block | present in application.yml | removed |
 | MCP client starter | present in the pom | removed |
+
+**Out of scope this slice**: the tool implementations themselves. `querySplunkLogs` keeps whatever Splunk HEC authentication it has today, and tenant context is not threaded into tool execution; those belong to a later tool feature, not the protocol and auth cutover.
 
 **Implementation skills**
 
@@ -85,12 +87,15 @@ Build approach: Tracer Bullet. The thinnest end to end thread is a bearer token 
 
 **Slice 2, streamable transport live (builds M-AC-1)**
 
-- Confirm the starter serves `tools/list` and `tools/call` for the registered service over `/mcp/v1`; tune the base path or prefix if the M7 defaults differ.
+- Confirm the starter serves `tools/list` and `tools/call` for the registered service over the streamable endpoint mounted under `/mcp/v1` (the 1.1.x line takes the full path in the mcp endpoint property).
+- Exit criteria: measure and record in the parent spec the exact mounted path and confirm that an initialize handshake returns a session id the client must echo, so Python caches the session per process and re initializes when it expires.
 - Tests: `tools/list` reports `echoTool` and `querySplunkLogs`; `tools/call` for `echoTool` returns its echo over the streamable endpoint.
 
 **Slice 3, migrate Python tool execution (builds M-AC-4, M-AC-8, umbrella AC-4)**
 
-- Change `POST /v1/tools/execute` in gateway-python to call the streamable endpoint instead of `/rpc`. Mint and cache an Auth0 client credentials token for the MCP audience, attach it as the bearer, send the tenant as a label header plus traceparent, parse the new response envelope, and return the same tool result shape to callers. The caller's JWT is never forwarded to mcp-server.
+- Change `POST /v1/tools/execute` in gateway-python to call the streamable endpoint instead of `/rpc`. The caller's JWT is never forwarded to mcp-server.
+- Token: Python mints and caches an Auth0 client credentials token carrying the audience mcp-server validates. It caches with an expiry skew, refreshing at `expires_in` minus 60 seconds, and on a 401 from mcp-server it retries exactly once with a fresh token to cover a rotation or expiry race. It attaches the token as the bearer, sends the tenant as a label header plus traceparent. Secrets come from `AUTH0_M2M_CLIENT_ID` and `AUTH0_M2M_CLIENT_SECRET` on the gateway-python service; Python fails fast if they are unset, and never logs the token or the secrets.
+- Response mapping: mcp-server's `tools/call` result (the MCP content array, text blocks concatenated) maps into the existing `ToolResult` shape `{status, result, trace_id}` so callers see an unchanged contract. JSON-RPC errors from mcp-server map to the tool error semantics `/v1/tools/execute` already returns.
 - Tests: `echoTool` success through `/v1/tools/execute`; a failing tool returns the tool error to the caller; `echoTool` succeeds end to end for a machine key caller who has no user JWT; the Python suite stays green.
 
 **Slice 4, retire `/rpc` (builds M-AC-2)**
@@ -118,5 +123,5 @@ Strangler within the parent 0015 phases: slices 1 and 2 add auth and the real tr
 
 ## Follow-up
 
-- [ ] Pin the M7 streamable path suffixes in the parent spec once develop measures them (shared follow up).
+- [x] Pin the upgraded streamable mount path in the parent spec once develop measures it (shared follow up). Measured on the 1.1.x line: the single mounted path is `/mcp/v1`, set by `spring.ai.mcp.server.streamable-http.mcp-endpoint` and confirmed by `StreamableMcpTransportTests`; Python calls `http://mcp-server:8081/mcp/v1`.
 - [ ] A later feature decision covers `validateFirewallRule` and which systems it drives.

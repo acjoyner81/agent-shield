@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     auth0_domain: str = "dev-zymaiayb0afkpn7n.us.auth0.com"
     auth0_audience: str = "https://api.agentshield.local"
     auth0_issuer: str = "https://dev-zymaiayb0afkpn7n.us.auth0.com/"
+    # Machine-to-machine application the gateway uses to call mcp-server with a
+    # client-credentials token (spec 0015.2, M-AC-8). The calling user's JWT is
+    # never forwarded to mcp-server.
+    auth0_m2m_client_id: str = ""
+    auth0_m2m_client_secret: str = ""
+    mcp_server_url: str = "http://mcp-server:8081/mcp/v1"
     redis_url: str = "redis://localhost:6379/0"
     request_timeout_seconds: int = 60
     default_rate_limit_rpm: int = 60

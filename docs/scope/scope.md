@@ -249,17 +249,18 @@ Give the 400 guardrail path a surface that exercises it end to end, so a blocked
 **Done when:** an operator can submit a prompt in the portal, see it blocked by the guardrail with the reason named on screen, and see the telemetry event that followed.
 - [ ] Build it: `/develop prompt tester for guardrails`
 
-### 19. Java Gateway Core Logic · in-progress · Slice 5
+### 19. Java Gateway Core Logic · in-progress (verified) · Slice 5
 
 Implement the Java Spring Boot gateway core logic as a complementary gateway service.
 **Done when:** the Java gateway starts and registers healthy, JWT validation is configured, and it coexists with the Python gateway.
 
 - [x] Design it (spec): `/architect java gateway core logic` → Spec 0015
-- [ ] Build it: `/develop java gateway core logic`
-   - [ ] MCP server: JWT on port 8081, the streamable transport serving `echoTool`, and Python `tools/execute` migrated onto it (umbrella AC-1, AC-4, AC-5)
-   - [ ] Gateway edge: telemetry emitter, routing failure events, and `gateway-java` on the health surface (umbrella AC-1, AC-2, AC-3)
-   - [ ] Thicken: retire `/rpc` and remove the Java request rate limiter (umbrella AC-4, AC-6)
-- [ ] Verify it: `/check verify java gateway core logic`
+- [x] Build it: `/develop java gateway core logic`
+   - [x] MCP server: JWT on port 8081, the streamable transport serving `echoTool`, and Python `tools/execute` migrated onto it (umbrella AC-1, AC-4, AC-5)
+   - [x] Gateway edge: telemetry emitter, routing failure events, and `gateway-java` on the health surface (umbrella AC-1, AC-2, AC-3)
+   - [x] Retire `/rpc` (umbrella AC-4)
+   - [x] Remove the Java request rate limiter (umbrella AC-6)
+- [x] Verify it: `/check verify java gateway core logic` — PASS 2026-10-16 against the live stack. Every umbrella AC and both child specs' G-/M-ACs met: the edge emits one `authz_failure` on a rejection and nothing for a served request (that is Python's single event), Python's 429 envelope passes through `gateway-java` unchanged, `/rpc` is gone with `tools/execute` reaching `/mcp/v1`, and `gateway-java` plus `mcp-server` both register on the health surface and flip unhealthy when stopped. Spec 0015 marked Verified.
 - [ ] Test it: `/test java gateway core logic`
 
 Spec 0015 · `docs/specs/0015-java-gateway-core/index.md` · children `0015-java-gateway.md`, `0015-mcp-server.md` · code in `java-services/gateway-java/`, `java-services/mcp-server/`
