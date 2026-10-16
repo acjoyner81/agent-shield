@@ -4,6 +4,7 @@ import { Auth0ClientService } from '@auth0/auth0-angular';
 import { firstValueFrom, of } from 'rxjs';
 
 import { authGuard } from './auth.guard';
+import { SESSION_REDIRECT_LATCH_KEY } from '../errors/error-state.service';
 
 /**
  * The guard's contract.
@@ -23,8 +24,9 @@ import { authGuard } from './auth.guard';
  */
 describe('authGuard', () => {
   let claims: Record<string, unknown> | undefined;
-  let client: { getIdTokenClaims: jasmine.Spy; loginWithRedirect: jasmine.Spy };
+  let client: { getIdTokenClaims: jasmine.Spy; loginWithRedirect: jasmine.Spy; handleRedirectCallback: jasmine.Spy };
   let router: Router;
+  let startUrl: string;
 
   const run = () =>
     TestBed.runInInjectionContext(() => authGuard(null as never, null as never)) as ReturnType<typeof of>;
@@ -34,12 +36,19 @@ describe('authGuard', () => {
     client = {
       getIdTokenClaims: jasmine.createSpy('getIdTokenClaims').and.callFake(async () => claims),
       loginWithRedirect: jasmine.createSpy('loginWithRedirect').and.resolveTo(undefined),
+      handleRedirectCallback: jasmine.createSpy('handleRedirectCallback').and.resolveTo({}),
     };
 
     TestBed.configureTestingModule({
       providers: [provideRouter([]), { provide: Auth0ClientService, useValue: client }],
     });
     router = TestBed.inject(Router);
+    startUrl = window.location.href;
+  });
+
+  afterEach(() => {
+    window.history.replaceState({}, '', startUrl);
+    localStorage.removeItem(SESSION_REDIRECT_LATCH_KEY);
   });
 
   it('admits the route when a session is cached', async () => {
@@ -74,5 +83,55 @@ describe('authGuard', () => {
     claims = undefined;
     const result = await firstValueFrom(run());
     expect(result).not.toEqual(router.createUrlTree(['/']));
+  });
+
+  it('exchanges a +code/state callback before answering about the session', async () => {
+    // The redirect from Auth0 lands back with the session still in the URL; the
+    // ID token cache is empty until the SDK turns that code into a cache entry.
+    // Answering before that exchange happened used to read "no claims" and send
+    // the user back to authorize: every landed page re-initiated the next one.
+    let callbackExchanged = false;
+    client.handleRedirectCallback.and.callFake(async () => {
+      callbackExchanged = true;
+    });
+    client.getIdTokenClaims.and.callFake(async () => (callbackExchanged ? claims : undefined));
+    window.history.replaceState({}, '', '/dashboard?code=abc&state=xyz');
+
+    const result = await firstValueFrom(run());
+
+    expect(result).toBe(true);
+    expect(client.handleRedirectCallback).toHaveBeenCalledTimes(1);
+    expect(client.loginWithRedirect).not.toHaveBeenCalled();
+  });
+
+  it('signs in rather than dead-ending when the exchange itself fails', async () => {
+    // A stale or tampered callback: the SDK rejects, no claims exist, and the
+    // guard must still refuse the route into a login, never a blank page.
+    client.handleRedirectCallback.and.callFake(async () => {
+      throw new Error('transaction not found');
+    });
+    claims = undefined;
+    window.history.replaceState({}, '', '/dashboard?code=abc&state=stale');
+
+    const result = await firstValueFrom(run());
+
+    expect(result).toBe(false);
+    expect(client.loginWithRedirect).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears a spent-redirect latch when a brand new sign-in begins', async () => {
+    // The latch lives in local storage, so it survives a closed and reopened tab
+    // next to the dead token that prompted the redirect. A genuinely fresh sign
+    // in is a new session and the latch belonged to the one that died; a spent
+    // latch that survives a new exchange would quietly swallow the one automatic
+    // redirect the fresh session is owed.
+    localStorage.setItem(SESSION_REDIRECT_LATCH_KEY, '1');
+    claims = undefined;
+
+    const result = await firstValueFrom(run());
+
+    expect(result).toBe(false);
+    expect(localStorage.getItem(SESSION_REDIRECT_LATCH_KEY)).toBeNull();
+    expect(client.loginWithRedirect).toHaveBeenCalledTimes(1);
   });
 });

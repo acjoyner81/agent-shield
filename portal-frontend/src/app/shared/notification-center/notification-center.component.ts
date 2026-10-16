@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, effect, inject, untracked } from '@angular/core';
-import { NotificationService } from '../../core/errors/error-state.service';
+import { NotificationService, SESSION_REDIRECT_LATCH_KEY } from '../../core/errors/error-state.service';
 import { AuthService } from '../../core/services/auth.service';
 
 /**
@@ -204,6 +204,20 @@ export class NotificationCenter {
    * Instance state, not signal state, on purpose. A signal would be read by the
    * effect that writes it, which is exactly the cycle that pegged the renderer.
    * Plain field, so no effect can depend on it.
+   *
+   * Mirrored into local storage at both writes. Without that, the latch dies
+   * with the page: the 401 redirect lands on `/?code=...`, the browser loads a
+   * fresh shell, and a brand new container answers "no redirect sent yet". A
+   * token the gateway refuses re-arms exactly that way, measuring 261 token
+   * exchanges in 8s even with the in-memory latch in place.
+   *
+   * Storage choice is load bearing, learned in the browser: the key used to live
+   * in session storage, and a verified loop read it back as `null` on the landing
+   * page even though the container had just written `'1'`, while the SDK's own
+   * token cache — which proves the session survives the round trip — persisted.
+   * The SDK's callback handling does not preserve an unrelated session-storage
+   * key across the redirect, so the latch must age alongside the token it
+   * guards, in local storage.
    */
   private redirectSent = false;
 
@@ -211,6 +225,18 @@ export class NotificationCenter {
   private successesAtRedirect = 0;
 
   constructor() {
+    // A page that reloaded mid-flight must inherit the latch it spent before the
+    // reload. Reading storage can throw in privacy mode or when storage is
+    // disabled, and the fallback is the pre-fix behaviour, not a crash.
+    try {
+      this.redirectSent = localStorage.getItem(SESSION_REDIRECT_LATCH_KEY) === '1';
+    } catch {
+      this.redirectSent = false;
+    }
+    // Fresh instance, fresh counter: the first success after a reload is proof
+    // the current token works, which is all the re-arm effect needs to know.
+    this.successesAtRedirect = this.notifications.acceptedResponses();
+
     // The 401 consequence, and the only place in the app that acts on it.
     //
     // `NotificationService.report` sets `sessionExpired` for a 401 and exempts that
@@ -233,6 +259,7 @@ export class NotificationCenter {
       }
       this.redirectSent = true;
       this.successesAtRedirect = this.notifications.acceptedResponses();
+      this.persistLatch(true);
       // Inside untracked so the write does not re-trigger this effect; the flag
       // is cleared in the same tick the redirect is issued.
       untracked(() => this.notifications.acknowledgeSessionExpiry());
@@ -262,8 +289,27 @@ export class NotificationCenter {
       }
       untracked(() => {
         this.redirectSent = false;
+        this.persistLatch(false);
       });
     });
+  }
+
+  /**
+   * Write the latch through to local storage, tolerating environments where
+   * storage is unavailable (privacy mode, disabled cookies, an agent's headless
+   * run). The in-memory field above is then still the whole latch; persistence
+   * only hardens it across reloads.
+   */
+  private persistLatch(sent: boolean): void {
+    try {
+      if (sent) {
+        localStorage.setItem(SESSION_REDIRECT_LATCH_KEY, '1');
+      } else {
+        localStorage.removeItem(SESSION_REDIRECT_LATCH_KEY);
+      }
+    } catch {
+      // Keep the in-memory latch; the app must not crash over a storage write.
+    }
   }
 
   /**

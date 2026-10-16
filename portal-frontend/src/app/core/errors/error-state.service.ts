@@ -33,6 +33,18 @@ const TOAST_LIFETIME_MS = 6000;
 /** Ticks the rate limit countdown. A second is the resolution Retry-After gives. */
 const COUNTDOWN_TICK_MS = 1000;
 
+/**
+ * The persistence key for the spent-redirect latch.
+ *
+ * Lives in localStorage, not session storage: the SDK's callback handling does
+ * not preserve an unrelated session-storage key across the redirect round trip
+ * (verified in the browser, where the key read back null on the landing page
+ * while the SDK's own cache kept working), and the SDK's token cache lives in
+ * localStorage too. The latch has to survive exactly as long as the token it
+ * guards, so they should age in the same place.
+ */
+export const SESSION_REDIRECT_LATCH_KEY = 'agentshield.session-redirect-latch';
+
 @Injectable({ providedIn: 'root' })
 export class NotificationService implements OnDestroy {
   private toastTimer: ReturnType<typeof setTimeout> | null = null;

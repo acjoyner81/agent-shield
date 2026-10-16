@@ -112,6 +112,19 @@ import { NotificationService } from '../../core/errors/error-state.service';
         The key is only shown once, right after you create it. Store it in your secret manager.
       </p>
     </section>
+
+    @if (isCreateModalOpen()) {
+      <app-key-create (create)="onCreateKey($event)" (cancel)="closeCreateModal()" />
+    }
+
+    @if (isRevokeModalOpen()) {
+      <app-key-confirmation
+        title="Revoke API Key"
+        message="Are you sure you want to revoke this API key? This action cannot be undone."
+        (confirm)="onRevokeKey()"
+        (cancel)="closeRevokeModal()"
+      />
+    }
   `,
 })
 export class KeysComponent implements OnInit {

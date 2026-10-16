@@ -1,7 +1,27 @@
 import { inject } from '@angular/core';
 import { CanActivateFn } from '@angular/router';
 import { Auth0ClientService } from '@auth0/auth0-angular';
-import { catchError, from, map, of } from 'rxjs';
+import { catchError, from, map, mergeMap, of } from 'rxjs';
+import { SESSION_REDIRECT_LATCH_KEY } from '../errors/error-state.service';
+
+/**
+ * A redirect from Auth0 lands back on the app with `?code` and `?state`, and the
+ * session only exists once the SDK has turned that code into a cache entry. The
+ * guard answers "is there a session" by reading the ID token cache, so it has to
+ * let the SDK perform that exchange first. A callback page read directly would
+ * see no claims, call `loginWithRedirect`, and click the user through one
+ * authorize round trip for every page load, consuming each code the moment it
+ * arrives. Measured in the browser at 261 token exchanges in about eight
+ * seconds, because every landed page immediately re-initiated the next.
+ *
+ * The exchange is idempotent in practice: the SDK only keeps one pending
+ * transaction, the guard only runs once per callback page, and a second call
+ * after the transaction is consumed throws, is swallowed below, and the claims
+ * read still finds the token the successful call cached.
+ */
+const hasRedirectCallback = (): boolean =>
+  new URLSearchParams(window.location.search).has('code') &&
+  new URLSearchParams(window.location.search).has('state');
 
 /**
  * Route guard for authenticated pages.
@@ -47,13 +67,34 @@ export const authGuard: CanActivateFn = () => {
   // back here and spins. Start the login flow instead and refuse the route,
   // which is what the stock guard did once it had correctly decided the user is
   // signed out.
+  //
+  // A fresh sign-in supersedes a spent redirect: the latch exists to say "a
+  // redirect already went out for the session this token represents". A brand
+  // new exchange is a new session, and the latch belongs to the one that died.
+  // This is what rescues a reopened tab, where local storage still holds the
+  // latch next to a dead token.
   const signIn = () => {
+    try {
+      localStorage.removeItem(SESSION_REDIRECT_LATCH_KEY);
+    } catch {
+      // Storage being unavailable is not a reason to refuse the login flow.
+    }
     void Promise.resolve(client.loginWithRedirect()).catch(() => undefined);
     return false;
   };
 
-  return from(client.getIdTokenClaims()).pipe(
-    map((claims) => (claims ? true : signIn())),
+  return from(
+    // If this page load IS the callback, let the SDK exchange the code before
+    // the cache is asked anything. No-op on an ordinary page load.
+    hasRedirectCallback()
+      ? client.handleRedirectCallback().catch(() => undefined)
+      : Promise.resolve(),
+  ).pipe(
+    mergeMap(() =>
+      from(client.getIdTokenClaims()).pipe(
+        map((claims) => (claims ? true : signIn())),
+      ),
+    ),
     // A cache read should not reject, but a rejected guard observable cancels
     // navigation outright and leaves the user on a blank page. An unreadable
     // cache is still an absent session, so sign in rather than dead-end.

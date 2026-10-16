@@ -3,7 +3,7 @@ import { signal } from '@angular/core';
 
 
 import { NotificationCenter } from './notification-center.component';
-import { NotificationService } from '../../core/errors/error-state.service';
+import { NotificationService, SESSION_REDIRECT_LATCH_KEY } from '../../core/errors/error-state.service';
 import { GatewayError } from '../../core/errors/gateway-error';
 import { AuthService } from '../../core/services/auth.service';
 
@@ -26,6 +26,11 @@ describe('NotificationCenter', () => {
   let auth: { login: jasmine.Spy; authenticated: () => boolean };
 
   beforeEach(async () => {
+    // The redirect latch persists in local storage so a full page reload does
+    // not hand a fresh container an unspent redirect. Storage must start clean
+    // for the same reason the rest of the state does.
+    localStorage.removeItem(SESSION_REDIRECT_LATCH_KEY);
+
     // The component owns the 401 redirect, so it injects the Auth0 client. A stub
     // keeps this suite about the container's own contract, and records the
     // redirect so the 401 behaviour is asserted here rather than only by hand.
@@ -441,6 +446,67 @@ describe('NotificationCenter', () => {
       expect(retry.textContent).toContain('Sign in again');
       retry.click();
       fixture.detectChanges();
+
+      expect(auth.login).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  /**
+   * The gap the in-memory latch cannot cover, proven in the browser: the 401
+   * redirect lands on `/?code=...`, which is a full page load, and a brand new
+   * container starts with `redirectSent = false`. The 261-exchange storm was
+   * measured against exactly that, and the component tests above cannot see it
+   * because a fixture never reloads. The latch therefore survives in local
+   * storage, and these assert that survival.
+   */
+  describe('across a full page reload', () => {
+    function reload(): ComponentFixture<NotificationCenter> {
+      const reloaded = TestBed.createComponent(NotificationCenter);
+      // One flush subscribes the new container's effects; without it the 401
+      // below reaches effects that were never armed.
+      reloaded.detectChanges();
+      return reloaded;
+    }
+
+    it('persists the spent redirect, so a fresh page does not redirect again', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      fixture.detectChanges();
+      expect(auth.login).toHaveBeenCalledTimes(1);
+      expect(localStorage.getItem(SESSION_REDIRECT_LATCH_KEY)).toBe('1');
+
+      // The page reloads: a fresh shell, a fresh container, the old latch.
+      const reloaded = reload();
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      reloaded.detectChanges();
+
+      expect(auth.login).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the notice to a user whose session is still refused after the reload', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      fixture.detectChanges();
+
+      const reloaded = reload();
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      reloaded.detectChanges();
+
+      expect(reloaded.nativeElement.textContent).toContain('Session expired');
+      expect(reloaded.nativeElement.textContent).toContain('Sign in again');
+    });
+
+    it('re-arms after a reload once the gateway accepts the new session', () => {
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      fixture.detectChanges();
+
+      const reloaded = reload();
+      // The first 2xx proves the re-minted token is good, drops the storage
+      // latch, and a genuinely new expiry is allowed one redirect again.
+      service.reportSuccess();
+      reloaded.detectChanges();
+      expect(localStorage.getItem(SESSION_REDIRECT_LATCH_KEY)).toBeNull();
+
+      service.report(gatewayError({ kind: 'session_expired', status: 401 }), 'silent');
+      reloaded.detectChanges();
 
       expect(auth.login).toHaveBeenCalledTimes(2);
     });
