@@ -1,7 +1,7 @@
 # 0015. Java Gateway Core (gateway-java and mcp-server)
 
 **Date**: 2026-10-07
-**Status**: Verified (2026-10-16)
+**Status**: Accepted
 
 ## Summary
 

@@ -1,7 +1,7 @@
 # 0015.1. Java Gateway Core. gateway-java
 
 **Date**: 2026-10-07
-**Status**: Verified (2026-10-16)
+**Status**: Accepted
 **Parent decision**: 0015 Java Gateway Core
 
 ## Summary

@@ -30,7 +30,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 16 | Eval Judge for Quality Scoring | Slice 4 | planned |
 | 17 | Stripe Metered Usage Reporting | Slice 3 | planned |
 | 18 | Prompt Tester for Guardrails | Slice 4 | planned |
-| 19 | Java Gateway Core Logic | Slice 5 | in-progress |
+| 19 | Java Gateway Core Logic | Slice 5 | done |
 
 ## Foundations
 
@@ -249,7 +249,7 @@ Give the 400 guardrail path a surface that exercises it end to end, so a blocked
 **Done when:** an operator can submit a prompt in the portal, see it blocked by the guardrail with the reason named on screen, and see the telemetry event that followed.
 - [ ] Build it: `/develop prompt tester for guardrails`
 
-### 19. Java Gateway Core Logic · in-progress (verified) · Slice 5
+### 19. Java Gateway Core Logic · done · Slice 5
 
 Implement the Java Spring Boot gateway core logic as a complementary gateway service.
 **Done when:** the Java gateway starts and registers healthy, JWT validation is configured, and it coexists with the Python gateway.
@@ -261,7 +261,7 @@ Implement the Java Spring Boot gateway core logic as a complementary gateway ser
    - [x] Retire `/rpc` (umbrella AC-4)
    - [x] Remove the Java request rate limiter (umbrella AC-6)
 - [x] Verify it: `/check verify java gateway core logic` — PASS 2026-10-16 against the live stack. Every umbrella AC and both child specs' G-/M-ACs met: the edge emits one `authz_failure` on a rejection and nothing for a served request (that is Python's single event), Python's 429 envelope passes through `gateway-java` unchanged, `/rpc` is gone with `tools/execute` reaching `/mcp/v1`, and `gateway-java` plus `mcp-server` both register on the health surface and flip unhealthy when stopped. Spec 0015 marked Verified.
-- [ ] Test it: `/test java gateway core logic`
+- [x] Test it: `/test java gateway core logic` — confirmed 2026-10-16, the suite was already in place and green: 139 Python tests including `gateway/tests/test_mcp_client.py`, `gateway-java` 27/27, and `mcp-server` 9/9. No uncommitted code remained to add tests against.
 
 Spec 0015 · `docs/specs/0015-java-gateway-core/index.md` · children `0015-java-gateway.md`, `0015-mcp-server.md` · code in `java-services/gateway-java/`, `java-services/mcp-server/`
 
