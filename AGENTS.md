@@ -33,6 +33,16 @@ We use a structured workflow to ensure technical consistency:
 - `sync`: Context and AGENTS.md management.
 - `test`: Testing strategy and writing.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues on `acjoyner81/agent-shield`, driven with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
 ## Current Progress & Decisions
 - [x] Basic Docker Compose stack (Redis, Splunk, Tripwire, Gateways, Frontend)
 - [x] Splunk platform architecture fix (ARM64 $\rightarrow$ AMD64)
