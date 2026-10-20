@@ -2,6 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import {
   HttpClient,
   HttpContext,
+  HttpEvent,
+  HttpEventType,
   provideHttpClient,
   withInterceptors,
 } from '@angular/common/http';
@@ -199,6 +201,59 @@ describe('gatewayErrorInterceptor', () => {
 
       expect(notifications.isStale('keys')).toBe(false);
       expect(notifications.staleNote('keys')).toBeNull();
+    });
+  });
+
+  describe('a success is a response, not a send', () => {
+    // The interceptor sees every HttpEvent. `tap` fires on the HttpSentEvent the
+    // moment a request goes out, before any status is known, so counting a
+    // success there re-armed the redirect latch and cleared the session notice
+    // on a call the gateway then refused. The unit backend only ever emitted a
+    // response, which is why the original tests passed over the bug: this suite
+    // pushes the send event by hand.
+    it('does not count the send event as an accepted response', () => {
+      const before = notifications.acceptedResponses();
+
+      http.get('/api/v1/usage/summary', { context: SILENT_POLL }).subscribe({ error: () => undefined });
+      const req = httpMock.expectOne('/api/v1/usage/summary');
+      req.event({ type: HttpEventType.Sent } as HttpEvent<unknown>);
+
+      expect(notifications.acceptedResponses()).toBe(before);
+
+      req.flush({});
+      expect(notifications.acceptedResponses()).toBe(before + 1);
+    });
+
+    it('leaves a live session notice up when a refused call is only sent', () => {
+      notifications.report(
+        { kind: 'session_expired', status: 401, message: 'expired' } as GatewayError,
+        'silent',
+      );
+      expect(notifications.sessionNotice()).not.toBeNull();
+
+      http.get('/api/v1/usage/summary', { context: SILENT_POLL }).subscribe({ error: () => undefined });
+      const req = httpMock.expectOne('/api/v1/usage/summary');
+      req.event({ type: HttpEventType.Sent } as HttpEvent<unknown>);
+
+      // Sending is not proof the session works: the notice must survive until a
+      // response says so, or a rejected token loops instead of showing the notice.
+      expect(notifications.sessionNotice()).not.toBeNull();
+
+      req.flush({ detail: 'expired' }, { status: 401, statusText: 'Unauthorized' });
+      expect(notifications.sessionNotice()).not.toBeNull();
+    });
+
+    it('does not mark a polled widget fresh on the send event', () => {
+      notifications.markStale('usage');
+
+      http.get('/api/v1/usage/summary', { context: SILENT_POLL }).subscribe({ error: () => undefined });
+      const req = httpMock.expectOne('/api/v1/usage/summary');
+      req.event({ type: HttpEventType.Sent } as HttpEvent<unknown>);
+
+      expect(notifications.isStale('usage')).toBe(true);
+
+      req.flush({});
+      expect(notifications.isStale('usage')).toBe(false);
     });
   });
 

@@ -1,4 +1,4 @@
-import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
+import { HttpErrorResponse, HttpEventType, HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { catchError, tap, throwError } from 'rxjs';
 
@@ -55,9 +55,17 @@ export const gatewayErrorInterceptor: HttpInterceptorFn = (req, next) => {
 
   return next(req).pipe(
     tap({
-      // The first success clears a sticky 429, so a banner cannot keep claiming
-      // the tenant is throttled once their requests are already succeeding.
-      next: () => {
+      // Only a real `HttpResponse` is proof the gateway accepted the request.
+      // The interceptor sees every `HttpEvent`, and `tap`'s `next` fires on the
+      // `HttpSentEvent` (type 0) the moment a request goes out, before any
+      // status is known. Treating that as a success counted a refused call as a
+      // working session: the send re-armed the redirect latch and cleared the
+      // session notice, so a 401 that followed re-redirected forever. Gate on
+      // the response event, which Angular emits only for a 2xx.
+      next: (event) => {
+        if (event.type !== HttpEventType.Response) {
+          return;
+        }
         const widget = widgetFor(req.url);
         if (widget !== undefined) {
           notifications.markFresh(widget);

@@ -1,14 +1,14 @@
 # 0013. Standardize gateway error handling in the Angular portal
 
 **Date**: 2026-09-29
-**Status**: In Progress
+**Status**: Accepted (verified 2026-10-19)
 
-> Status corrected 2026-10-05, from `Accepted` to `In Progress`, because verification came back
-> Partial rather than passing. Every classification, surface, precedence, accessibility and
-> honesty rule was proven against real gateway refusals, but two statements in this spec are
-> still unmet: a persistently rejected token loops re-auth with no limit (261 token exchanges in
-> 8s), and the "last updated N ago" note is bound only on `/logs`. Both are recorded in
-> `verify.md`. The decision stands; the feature is not verified.
+> Status restored to `Accepted` on 2026-10-19. The 2026-10-05 fix had not actually closed the
+> re-auth loop at runtime: the interceptor counted Angular's `HttpSentEvent` (emitted at send
+> time) as a success, so the latch re-armed on every refused call. Gating success on a real
+> `HttpResponse` closes it. The browser re-verify then measured 3 redirects total (stable at
+> 10s), the session notice with `role="alert"`, and the staleness note on the dashboard's usage
+> and health widgets and on the keys list. See `verify.md`.
 
 ## Summary
 

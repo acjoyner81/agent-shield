@@ -8,5 +8,8 @@ export const routes: Routes = [
 	{ path: 'logs', canActivate: [authGuard], loadComponent: () => import('./features/logs/logs.component').then((m) => m.LogsComponent) },
 	{ path: 'keys', canActivate: [authGuard], loadComponent: () => import('./features/keys/keys.component').then((m) => m.KeysComponent) },
 	{ path: 'pricing', canActivate: [authGuard], loadComponent: () => import('./features/pricing/pricing.component').then((m) => m.PricingComponent) },
+	{ path: 'agent', canActivate: [authGuard], loadComponent: () => import('./features/agent-runtime/agent-runtime.component').then((m) => m.AgentRuntimeComponent) },
+	{ path: 'evaluations', canActivate: [authGuard], loadComponent: () => import('./features/evaluations/evaluations.component').then((m) => m.EvaluationsComponent) },
+	{ path: 'models', canActivate: [authGuard], loadComponent: () => import('./features/models-routing/models-routing.component').then((m) => m.ModelsRoutingComponent) },
 	{ path: '**', redirectTo: 'dashboard' },
 ];

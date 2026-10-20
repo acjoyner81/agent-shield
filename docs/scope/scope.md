@@ -224,7 +224,7 @@ Give machine access a real credential lifecycle: hashed storage, rotation with a
 - [ ] Document it: `/document api key rotation`
 Spec 0010 · `docs/specs/0010-api-key-rotation/index.md` · code in `gateway/keys.py`, `gateway/auth.py`
 
-### 12. UI Error Handling · in-progress
+### 12. UI Error Handling · done
 Make every gateway refusal visible and correctly placed, and stop the portal from rendering invented telemetry when a fetch fails.
 **Done when:** a 402, 429, or 403 is named on screen with the right surface, a failed background poll marks its widget stale instead of interrupting, and no seeded rows or hardcoded metrics remain.
 - [x] Design it (spec): `/architect ui error handling` → Spec 0013
@@ -235,8 +235,9 @@ Make every gateway refusal visible and correctly placed, and stop the portal fro
    - [x] Replace the `console.warn` and `error: () => undefined` handlers, drop the seeded rows and hardcoded log metrics
    - [x] Enrich the portal facing 402 with the spend and cap figures
    - [x] Fix the 2 defects the runtime check found: bound the re-auth redirect by gateway evidence instead of the SDK's session flag, add the session notice it obliges, and bind the staleness note on every widget including the keys list
-- [ ] Verify it: `/check verify ui error handling` — run 2026-10-02, verdict Partial, findings closed 2026-10-05. Every classification, surface, precedence, accessibility and honesty rule proven against real gateway refusals. The 2 unmet spec statements (a persistently rejected token looping re-auth without limit, and the "last updated N ago" note bound only on `/logs`) are fixed and covered by tests that reproduce their conditions; the fixes have not yet been driven through a browser, so the tick stays open. Findings and method in `docs/specs/0013-ui-error-handling/verify.md`.
-- [x] Test it: `/test ui error handling` — `classify.spec.ts`, `error-state.service.spec.ts`, `gateway-error.interceptor.spec.ts`, and `notification-center.component.spec.ts` cover the classifier, the store, the interceptor, and the live region, plus the dashboard and keys staleness bindings. 172 portal tests passing. Tick synced 2026-10-05.
+   - [x] Fix the third defect the 2026-10-19 re-verify found: the interceptor counted Angular's `HttpSentEvent` (send time) as a success, so the latch re-armed on every refused call and the loop survived the earlier fix. Success now requires a real `HttpResponse`.
+- [x] Verify it: `/check verify ui error handling` — re-run 2026-10-19, verdict **PASS**. A persistently rejected token produces 3 redirects total (stable at 10s) and a `role="alert"` session notice with **Sign in again**; the staleness note is bound on the dashboard's usage and health widgets and on the keys list, and the last figures are kept. All other classification, surface, precedence, accessibility and honesty rules were proven in the 2026-10-02 run against real gateway refusals. Evidence in `docs/specs/0013-ui-error-handling/verify.md`.
+- [x] Test it: `/test ui error handling` — `classify.spec.ts`, `error-state.service.spec.ts`, `gateway-error.interceptor.spec.ts`, and `notification-center.component.spec.ts` cover the classifier, the store, the interceptor, and the live region, plus the dashboard and keys staleness bindings. 181 portal tests passing, including three regression tests that push the `HttpSentEvent` by hand. Tick synced 2026-10-19.
 Spec 0013 · `docs/specs/0013-ui-error-handling/index.md` · code in `portal-frontend/src/app/core/errors/`, `portal-frontend/src/app/core/services/`, `gateway/main.py`
 
 ### 16. Eval Judge for Quality Scoring · planned · needs a decision · from spec 0011

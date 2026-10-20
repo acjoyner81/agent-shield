@@ -18,7 +18,23 @@ export class App {
   private readonly telemetry = inject(TelemetryService);
   private readonly notifications = inject(NotificationService);
   readonly pageTitle = inject(Router).events.pipe(filter((event) => event instanceof NavigationEnd), map((event) => this.titleFor((event as NavigationEnd).urlAfterRedirects)));
-  private titleFor(url: string): string { return url.includes('logs') ? 'Observability' : url.includes('keys') ? 'API keys & access' : url.includes('pricing') ? 'Plans & billing' : 'Overview'; }
+  private titleFor(url: string): string {
+    return url.includes('logs')
+      ? 'Observability'
+      : url.includes('keys')
+        ? 'API keys & access'
+        : url.includes('pricing')
+          ? 'Plans & billing'
+          : url.includes('agent')
+            ? 'Agent runtime'
+            : url.includes('evaluations')
+              ? 'Evaluations'
+              : url.includes('models')
+                ? 'Models & routing'
+                : url.includes('docs')
+                  ? 'Help center'
+                  : 'Overview';
+  }
 
   /**
    * Shell health, from the same `/v1/health/services` the dashboard reads.

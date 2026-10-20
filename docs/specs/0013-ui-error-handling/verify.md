@@ -1,4 +1,4 @@
-# Verify: UI Error Handling · spec 0013 · updated 2026-10-02
+# Verify: UI Error Handling · spec 0013 · updated 2026-10-19
 _Steps derived from the normative statements in spec 0013. This spec has no `AC-N` list, so each step names the section it comes from and quotes the claim it tests. `/check verify` runs these; `/test` already locks the classifier, store, interceptor and container._
 
 ## Prerequisite
@@ -6,8 +6,12 @@ _Steps derived from the normative statements in spec 0013. This spec has no `AC-
 Containers running (`gateway-python` on 8000 rebuilt on current code), plus a dev server for the portal:
 
 ```bash
-cd portal-frontend && nohup npx ng serve --port 4300 --proxy-config proxy.conf.json > /tmp/ng-serve-verify.log 2>&1 &
+cd portal-frontend && nohup npx ng serve --port 4200 --proxy-config proxy.conf.json > /tmp/ng-serve-verify.log 2>&1 &
 ```
+
+The compose `portal-frontend` container also publishes `:4200`; stop it first (`docker stop
+agentshield-frontend`) or the dev server fails to bind, and restore it with `docker start
+agentshield-frontend` afterwards.
 
 `/dashboard`, `/logs` and `/keys` sit behind the custom guard in `core/guards/auth.guard.ts`. This machine has no Auth0 account in `dev-zymaiayb0afkpn7n`, so the browser run intercepts the Auth0 authorize iframe **and** the token endpoint: `/authorize` is answered with a code the SPA then exchanges, and `/oauth/token` returns one of the gateway's own dev tokens. The minted access token is a real credential the real gateway accepts, so every `/api/v1/*` answer in this report came from `gateway-python` through the dev-server proxy. **No gateway response was stubbed** except the three cases labeled injected below.
 
@@ -165,6 +169,64 @@ All 12 keys created during these runs (`Verify Banner Key`, `drain probe`) were 
 `rate_limit:tenant_alpha` bucket was deleted, today's `budget:tenant_alpha:2026-10-02` key was
 deleted, and `telemetry_history` was restored (100 entries) after being renamed aside for the empty
 state check. No other tenant data was touched.
+
+## Result (2026-10-19 re-verify)
+
+Verdict **PASS**. Both fixes the 2026-10-05 note left owed were driven through a browser
+against the real `gateway-python` (Auth0 mocked, every unlabeled `/api/v1/*` answer the
+gateway's). The re-run also found a third defect the earlier unit-locked fix had not
+actually closed at runtime.
+
+### Finding 1 is closed, after a real root cause was found
+
+A bearer the gateway rejects (`gateway-rejected-bearer`) now produces:
+
+- `/authorize` hits **3** and `/oauth/token` hits **3** at t=4s, and the same counts at
+  t=10s — the redirect is spent, not unbounded (the 2026-10-02 run measured 261 exchanges).
+- The session notice is visible with `role="alert"`, text **"Session expired · Invalid
+  access token · Sign in again"**, and a **Sign in again** button.
+- Final URL `/dashboard`, zero `pageerror`s.
+
+**Root cause of the loop that survived the 2026-10-05 fix.** `gateway-error.interceptor.ts`
+counted a success in `tap({ next })` without checking the event type. `tap`'s `next` fires
+on *every* `HttpEvent`, including the `HttpSentEvent` (type 0) Angular emits the instant a
+request goes out — before any status exists. So `reportSuccess()` ran on **send**, bumping
+`acceptedResponses` and clearing `sessionNotice`; the container's re-arm effect saw the
+counter move and dropped the redirect latch on every cycle, so the next 401 redirected
+again. Gating the tap on `event.type === HttpEventType.Response` (Angular emits a Response
+event only for a 2xx; a 401 arrives through `error`) fixes it. The unit suite never caught
+this because `HttpTestingController.flush` emits only a Response event — the send event is
+now pushed by hand in three new regression tests.
+
+### Finding 2 is closed
+
+- Fresh dashboard: `.stale-note` count **0**.
+- Inject 503 on `usage` and `health`, then click **Refresh**: notes **"last updated 5s
+  ago"** and **"last updated 0s ago"**, and the metric tiles are byte-identical before and
+  after (`dashboard_metrics_kept: true`).
+- Keys list: fresh **0** notes; after an injected 503 on a later load, **"· last updated 2s
+  ago"**.
+
+A widget that has never loaded correctly shows **no** note: `relativeLastUpdated` returns
+null while `lastUpdatedAt` is null, because there are no figures on screen to call old. The
+first driver attempt reported a false failure for exactly this reason — it clicked Refresh
+while the initial load was still in flight, so the widget went stale before it was ever
+fresh. The driver now waits for real data (a named health probe and a numeric metric), not
+the empty-state placeholders.
+
+### Verification artifacts
+
+- Driver: `/tmp/s0013_verify.py` (both findings); focused probes
+  `/tmp/s0013_probe.py`, `/tmp/s0013_probe2.py`, `/tmp/s0013_f2.py`.
+- Portal tests: **181 passing**, including three new `gateway-error.interceptor` tests that
+  assert a send event is not a success, does not clear the session notice, and does not
+  mark a widget fresh.
+- Production build: succeeds (pre-existing bundle-budget warning only).
+- Dev-server note: the compose `portal-frontend` container publishes `:4200`, so it was
+  stopped (`docker start agentshield-frontend` restores it) to run the dev server there. A
+  `pathRewrite: {"^/api": ""}` was added to `proxy.conf.json` so the keys page's "Open API
+  reference" link (`/api/docs`) matches `nginx.conf`'s trailing-slash rewrite and reaches
+  Swagger instead of 404ing.
 
 ## Normative-statement coverage
 
