@@ -1,0 +1,13 @@
+:host { display:block; max-width:980px; margin:0 auto; }
+.page-head { align-items:center; }
+.docs-document { padding:28px 32px; background:#fff; border:1px solid var(--line); border-radius:8px; }
+.docs-document > h2 { margin-bottom:23px; font-size:19px; }
+.docs-section { padding:19px 0; border-top:1px solid #edf1f2; scroll-margin-top:85px; }
+.docs-section h3 { margin:0 0 11px; font-size:15px; }
+.docs-section p,.docs-section li { color:#52656e; font-size:12px; line-height:1.75; }
+.docs-section p + p { margin-top:10px; }
+.docs-section a { color:#087d69; text-decoration:underline; text-underline-offset:2px; }
+.docs-section ul { padding-left:20px; }
+.docs-section pre { max-width:100%; overflow:auto; margin:13px 0 0; padding:15px; border-radius:6px; background:#14212a; color:#d8e7e7; font:11px/1.6 'DM Mono',monospace; }
+.docs-error { padding:20px; color:#8f352d; }
+@media(max-width:600px) { .page-head { align-items:flex-start; } .page-head .button { width:100%; text-align:center; } .docs-document { padding:20px 16px; } }

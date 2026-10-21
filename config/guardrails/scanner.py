@@ -1,5 +1,5 @@
 import re
-from typing import List, Tuple
+from typing import Iterable, List, Tuple
 from fastapi import HTTPException, status
 
 # Patterns for identifying prompt injection attempts
@@ -27,6 +27,17 @@ PII_PATTERNS = {
     "SSN": r"\b\d{3}-\d{2}-\d{4}\b",
     "CREDIT_CARD": r"\b(?:\d{4}[- ]?){3}\d{4}\b",
     "EMAIL": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+    "API_KEY": (
+        r"\b(?:sk-[A-Za-z0-9_-]{20,}|sk_(?:live|test)_[A-Za-z0-9]{16,}|"
+        r"gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})\b"
+    ),
+}
+
+PII_PATTERN_NAMES = {
+    "ssn": "SSN",
+    "credit_card": "CREDIT_CARD",
+    "email": "EMAIL",
+    "api_key": "API_KEY",
 }
 
 
@@ -48,7 +59,9 @@ def scan_prompt_injection(messages: List[dict]) -> None:
                 )
 
 
-def redact_pii(text: str) -> Tuple[str, bool]:
+def redact_pii(
+    text: str, mask_patterns: Iterable[str] | None = None
+) -> Tuple[str, bool]:
     """
     Scans text for PII patterns and replaces them with [REDACTED_<TYPE>].
     Returns tuple of (redacted_text, had_pii).
@@ -59,7 +72,16 @@ def redact_pii(text: str) -> Tuple[str, bool]:
     modified = False
     redacted_text = text
 
-    for pii_type, pattern in PII_PATTERNS.items():
+    selected_patterns = (
+        PII_PATTERNS.items()
+        if mask_patterns is None
+        else (
+            (PII_PATTERN_NAMES[name], PII_PATTERNS[PII_PATTERN_NAMES[name]])
+            for name in mask_patterns
+            if name in PII_PATTERN_NAMES
+        )
+    )
+    for pii_type, pattern in selected_patterns:
         if re.search(pattern, redacted_text):
             modified = True
             redacted_text = re.sub(pattern, f"[REDACTED_{pii_type}]", redacted_text)

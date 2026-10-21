@@ -1,227 +1,137 @@
-# AgentShield Enterprise
+# AgentShield
 
-AgentShield is a multi-tenant AI gateway and agent platform for small businesses that need predictable LLM costs, secure tool access, reliable model routing, and measurable answer quality.
+AgentShield is a multi tenant AI gateway and agent platform. For the Meta Global AI Developer Hackathon, it routes requests to a Meta model hosted by Baseten and applies tenant authentication, ingress guardrails, output filtering, and asynchronous audit telemetry.
 
-The project is designed as a learning and product-building system covering:
+## Meta model request path
 
-- Secure tenant onboarding, login, RBAC, API keys, and audit trails
-- FastAPI gateway controls for authentication, rate limiting, budgets, caching, and cost analysis
-- LangGraph orchestration with governed FastMCP tools
-- Java 21 and Spring Boot microservices for high-throughput enterprise integrations
-- Model routing, load balancing, fallback, and circuit breaking
-- LLM-as-a-Judge evaluations for relevance, faithfulness, safety, and regression detection
-- LangSmith tracing, Splunk dashboards, and Dynatrace APM
-- VM and workload tuning using traffic, latency, token, and resource data
-- Usage-based billing and subscription tiers
+![Meta model request path, from client authentication and ingress guardrails through Baseten inference, output filtering, and asynchronous audit monitoring.](docs/demo/meta-model-request-path.svg)
 
-## Current Status
+## Hackathon integration
 
-The initial service boundaries are scaffolded. Gateway, MCP, agent, evaluation, and observability implementations will be added incrementally behind these boundaries.
+- **Baseten routing:** `POST /v1/meta/chat/completions` proxies OpenAI compatible requests to the configured Baseten endpoint. The default model is `meta-models/muse-spark-open`.
+- **YAML configuration:** `agent_shield_config.yaml` sets the provider, model, timeout, maximum output tokens, ingress guardrails, and reasoning sanitization.
+- **Ingress protections:** configurable prompt injection detection blocks suspicious user prompts. Configured PII patterns are redacted before requests reach the provider.
+- **Egress protections:** configured PII is redacted from model output, and `reasoning` and `reasoning_content` are removed from completion messages and deltas before the response is returned.
+- **Tenant access:** the route accepts a verified tenant bearer token or an active tenant API key in `X-Tenant-API-Key`. Provider credentials stay in the gateway.
+- **Audit and operations:** security and request events enter the asynchronous telemetry pipeline for Splunk HEC. Tripwire monitors configured files and publishes its verdict to the gateway health surface.
 
-## Planned Repository Layout
+## Architecture
 
-```text
-agent-shield/
-├── config/
-│   ├── settings.py
-│   └── guardrails/
-├── mcp_servers/
-│   ├── __init__.py
-│   └── tools_server.py
-├── gateway/
-│   ├── main.py
-│   ├── auth.py
-│   └── rate_limiter.py
-├── agent_engine/
-│   ├── graph.py
-│   ├── mcp_client.py
-│   └── state.py
-├── evals/
-│   └── judge.py
-├── observability/
-│   ├── splunk_exporter.py
-│   └── dynatrace_tracer.py
-├── java-services/
-│   ├── gateway-java/
-│   │   ├── pom.xml
-│   │   └── src/main/java/com/agentshield/gateway/
-│   └── mcp-server/
-│       ├── pom.xml
-│       └── src/main/java/com/agentshield/mcp/
-├── portal-frontend/
-│   ├── src/app/core/
-│   ├── src/app/features/
-│   ├── package.json
-│   └── angular.json
-├── .env.example
-├── requirements.txt
-├── docker-compose.yml
-└── README.md
-```
+The stack includes an Angular portal, a Python FastAPI gateway, Java gateway and MCP services, Redis, Splunk, and Tripwire. The Python gateway handles tenant authentication, rate limits, billing and usage surfaces, key management, model proxying, and telemetry. The Java services provide a separate edge gateway and MCP server.
 
-## Architecture Overview
+For the Meta route, the request path is:
 
-```mermaid
-flowchart TD
-    subgraph Client ["Client Layer"]
-        UI["Angular Portal Frontend\n(Port 4200)"]
-    end
-
-    subgraph Auth ["Authentication & Identity"]
-        Auth0["Auth0 OIDC Provider\n(JWKS RS256 / Authorize)"]
-    end
-
-    subgraph Edge ["Edge & Reverse Proxy"]
-        Nginx["Nginx Reverse Proxy\n(portal-frontend container)"]
-    end
-
-    subgraph Gateways ["Dual Gateway Layer"]
-        PyGW["FastAPI Gateway (Python)\n(Port 8000 /api/python)"]
-        JavaGW["Spring Cloud Gateway (Java 21)\n(Port 8080 /api/java)"]
-    end
-
-    subgraph Security ["Security & Monitoring"]
-        Tripwire["Tripwire FIM Container\n(Read-Only Volume Monitoring)"]
-    end
-
-    subgraph Core ["Orchestration & State"]
-        Redis[("Redis 7 Cache &\nRate Limiting")]
-        LangGraph["LangChain / LangGraph Engine\n(Agent Runtime & State Graph)"]
-        MCPServers["MCP Servers\n(FastMCP & Java Tools)"]
-    end
-
-    subgraph Observability ["Telemetry & Governance"]
-        LangSmith["LangSmith Tracing"]
-        Splunk["Splunk / Dynatrace"]
-    end
-
-    %% Flows
-    UI -- "1. Login / Redirect" --> Auth0
-    Auth0 -- "2. Return JWT Token" --> UI
-    UI -- "3. Authenticated Requests (Bearer JWT)" --> Nginx
-
-    Nginx -- "/api/python/*" --> PyGW
-    Nginx -- "/api/java/*" --> JavaGW
-
-    PyGW -- "Verify Token (JWKS)" --> Auth0
-    JavaGW -- "Verify Token (JWKS)" --> Auth0
-
-    PyGW -- "Rate Limiting & Token Cache" --> Redis
-    JavaGW -- "State & Cache" --> Redis
-
-    PyGW --> LangGraph
-    LangGraph --> MCPServers
-    LangGraph -- "Prompt & Graph Execution" --> LangSmith
-    PyGW -- "Audit & Telemetry" --> Splunk
-
-    Tripwire -. "Inspect RO Volumes" .-> PyGW
-    Tripwire -. "Inspect RO Volumes" .-> JavaGW
-    Tripwire -. "Inspect RO Volumes" .-> Nginx
-```
-
-The system ensures provider credentials remain behind the gateway. Tenants never receive upstream model keys, and MCP tools enforce authorization independently of the agent prompt.
-
-## Local Prerequisites
-
-- Python 3.12+
-- Java 21+
-- Maven 3.9+
-- Docker Desktop with Compose
-- Redis
-- Optional accounts for LangSmith, Splunk, Dynatrace, Stripe, and an OIDC provider
+1. Authenticate the tenant and resolve its tenant ID.
+2. Scan user messages for prompt injection and reject detected attacks before proxying.
+3. Redact configured PII and enforce the configured `max_tokens` limit.
+4. Send the request to the configured model provider with the gateway's Baseten credential.
+5. Redact configured PII from the response and remove internal reasoning fields.
+6. Return the filtered response and queue content safe audit events for asynchronous shipping.
 
 ## Configuration
 
-Copy the example configuration into the local environment file:
+Copy the template and set the credentials you need:
 
 ```bash
 cp .env.example .env
 ```
 
-Fill in only the services you intend to run. Never commit `.env` or real credentials. The example file contains variable names and safe development defaults only.
+Set `BASETEN_API_KEY` in `.env`. The provider URL defaults to the value in `agent_shield_config.yaml`; `META_API_BASE_URL` can override it. Do not commit `.env` or share provider credentials.
 
-## Intended Local Startup
+Create a tenant API key in the Angular portal if you do not already have its full secret. The portal shows the secret only once. Save it in `.env` as `AGENTSHIELD_API_KEY` for local client commands. This is a client-side convenience variable; the gateway does not use it as its Baseten credential.
 
-Once the services are implemented, the expected development workflow will be:
+## Start the stack
 
-```bash
-docker compose up -d redis
-
-# Python gateway
-python -m uvicorn gateway.main:app --reload --port 8000
-
-# Java MCP service
-mvn -f java-services/mcp-server spring-boot:run
-
-# Java edge gateway (port 8080)
-mvn -f java-services/gateway-java spring-boot:run
-
-# Angular control plane (port 4200)
-cd portal-frontend && npm start
-```
-
-The exact commands may change as each service is added. Keep service-specific commands in their own README files when implementation starts.
-
-## Local Compose Services
-
-After setting `SPLUNK_PASSWORD` in `.env`, start the local stack with:
+To start the full local stack, configure the required Splunk values in `.env`, then run:
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-### Service Endpoints
+To rebuild only the Python gateway and its required Redis dependency:
 
-| Service | URL / Port | Description |
-| :--- | :--- | :--- |
-| **Angular Portal** | [http://localhost:4200](http://localhost:4200) | Main User Interface & Control Plane |
-| **FastAPI Gateway** | [http://localhost:8000](http://localhost:8000) | Python Edge Gateway & API |
-| **Java Gateway** | [http://localhost:8080](http://localhost:8080) | Spring Boot Edge Gateway |
-| **Java MCP Server** | [http://localhost:8081](http://localhost:8081) | Model Context Protocol Server |
-| **Splunk Web** | [http://localhost:8001](http://localhost:8001) | Observability Dashboards |
-| **Splunk HEC** | [http://localhost:8088](http://localhost:8088) | HTTP Event Collector (Telemetry) |
-| **Tripwire** | `N/A` | File Integrity Monitoring (Background Service) |
-| **Redis** | `localhost:6379` | Cache & Rate Limiting Store |
+```bash
+docker compose up -d --build gateway-python
+```
 
-### Common Operations
+Useful endpoints:
 
-| Goal | Command |
-| :--- | :--- |
-| **Start everything** (background) | `docker compose up -d` |
-| **Stop everything** | `docker compose down` |
-| **Rebuild and start** | `docker compose up --build` |
-| **View all logs** | `docker compose logs -f` |
-| **Monitor Tripwire logs** | `docker logs -f agent-shield-tripwire` |
-| **Check service status** | `docker compose ps` |
-| **Enter Python Gateway shell** | `docker exec -it agentshield-python-gateway sh` |
+| Service | Address |
+| --- | --- |
+| Angular portal | `http://localhost:4200` |
+| Python gateway | `http://localhost:8000` |
+| Java gateway | `http://localhost:8080` |
+| MCP server | `http://localhost:8081` |
+| Splunk web | `http://localhost:8001` |
+| Splunk HEC | `https://localhost:8088` |
 
+## Send a Meta inference request
 
-## Initial Delivery Phases
+Use a tenant key created in the portal. The literal `key_alpha_123` is not a provisioned key and will be rejected. In Bash or Zsh, load your local `.env` and send the key in the documented header:
 
-1. **Foundation:** repository layout, configuration, tenant model, FastAPI gateway, Redis rate limits, request IDs, and health checks.
-2. **Reliable routing:** LiteLLM integration, token and dollar accounting, semantic caching, model fallback, load balancing, and circuit breakers.
-3. **Agent runtime:** LangGraph state management, FastMCP discovery and invocation, tool-level RBAC, and execution limits.
-4. **Safety and quality:** input/output guardrails, PII handling, prompt-injection defenses, LLM-as-a-Judge, and regression evals.
-5. **Enterprise operations:** LangSmith traces, Splunk HEC events and dashboards, Dynatrace OpenTelemetry, alerts, and VM tuning experiments.
-6. **Commercialization:** OIDC signup, Stripe subscriptions, usage metering, tenant administration, support workflows, and production hardening.
+```bash
+set -a
+. ./.env
+set +a
 
-## Security Baseline
+curl --fail-with-body -X POST http://localhost:8000/v1/meta/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-API-Key: $AGENTSHIELD_API_KEY" \
+  -d '{
+    "model": "meta-models/muse-spark-open",
+    "messages": [
+      {"role": "user", "content": "Write a short Python function to calculate factorial and explain it."}
+    ]
+  }'
+```
 
-- Use OIDC/OAuth2 for human login and short-lived JWTs.
-- Store service credentials in a secret manager in deployed environments.
-- Hash or encrypt tenant API keys; do not store them in plaintext.
-- Apply tenant scoping at every data and tool boundary.
-- Validate MCP tool arguments with typed schemas and enforce per-tool permissions.
-- Redact prompts, responses, tokens, and credentials before exporting telemetry.
-- Add request IDs, audit events, budget checks, and idempotency handling to gateway requests.
-- Treat model output as untrusted input.
+The route returns the upstream completion inside `model_output`, along with the resolved `tenant_id` and request status. A valid tenant key and configured Baseten credential are required.
 
-## Development Principles
+## Tests
 
-- Prefer reproducible local infrastructure through Docker Compose.
-- Keep provider-specific code behind interfaces so routing and fallback remain testable.
-- Test security failures, budget exhaustion, rate-limit behavior, fallback behavior, and tenant isolation before optimizing throughput.
-- Use synthetic or scrubbed data for load tests and evaluation datasets.
+The focused Meta router suite is `gateway/tests/test_meta_router.py`. It covers successful proxying, tenant authorization, prompt injection blocking, input and output PII redaction, token limits, upstream failures and timeouts, telemetry event queueing, and reasoning sanitization. The upstream HTTP boundary is mocked, so these tests do not make a live Baseten request or prove Splunk has indexed an event.
+
+The production gateway image does not include pytest or development requirements. Run the focused suite in a disposable Compose container with the workspace mounted:
+
+```bash
+docker compose run --rm --no-deps \
+  -v "$PWD:/app" -w /app \
+  --entrypoint /bin/sh gateway-python \
+  -c 'python -m pip install --quiet -r requirements-dev.txt && python -m pytest -q gateway/tests/test_meta_router.py'
+```
+
+The current focused suite has 13 passing tests.
+
+## Tripwire operations
+
+Tripwire checks monitored files and reports both metadata and content differences. Docker Desktop file sharing can cause metadata drift, but review each report before changing the approved baseline. A baseline approval accepts the current monitored tree, including content changes.
+
+Inspect the newest report:
+
+```bash
+docker compose exec tripwire sh -lc 'report=$(ls -t /var/lib/tripwire/report | head -n 1); twprint -m r -r "/var/lib/tripwire/report/$report"'
+```
+
+After reviewing and confirming the changes are authorized, approve the baseline:
+
+```bash
+docker compose exec tripwire /approve.sh --yes
+```
+
+Check the service health surface with a valid tenant token:
+
+```bash
+curl http://localhost:8000/v1/health/services \
+  -H "X-Tenant-API-Key: $AGENTSHIELD_API_KEY"
+```
+
+## Security notes
+
+- Keep `.env`, tenant API keys, and provider credentials out of source control and logs.
+- Tenant API key secrets are returned only when created. Store them securely; the portal retains only masked key details for later display.
+- A tenant API key belongs in `X-Tenant-API-Key`. `BASETEN_API_KEY` is a separate server-side provider credential.
+- Inspect Tripwire reports before baseline approval. Approval is a security decision, not an automatic cleanup step.
+- Model output is untrusted input. The Meta route removes known reasoning fields and redacts the configured PII patterns, but callers should continue to handle model output safely.
 
 ## License
 

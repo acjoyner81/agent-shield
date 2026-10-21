@@ -1,5 +1,6 @@
 """FastAPI gateway with tenant rate limits, budgets, caching, and audit events."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -8,6 +9,7 @@ import re
 import time
 import uuid
 import httpx
+from contextlib import asynccontextmanager
 from typing import Annotated, Optional
 from datetime import datetime, timezone
 
@@ -18,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 
 from config.settings import settings
 from gateway.auth import verify_jwt, resolve_active_tenant, require_permission
+from gateway.dependencies import verify_tenant_quota
 from gateway.middleware import TelemetryMiddleware
 from gateway.rate_limit import verify_rate_limit
 from gateway.pricing import estimate_cost_usd
@@ -30,8 +33,10 @@ from gateway.telemetry import (
 from gateway.webhooks import router as webhook_router
 from gateway.billing import router as billing_router
 from gateway.metering import router as metering_router
-from gateway.dependencies import verify_tenant_quota
 from gateway.keys import router as keys_router
+from gateway.routers.meta_models import router as meta_models_router
+from gateway.routers.help_assistant import router as help_assistant_router
+from gateway.observability.tripwire_watcher import TripwireDriftWatcher
 from gateway.mcp_client import (
     McpConfigurationError,
     McpToolError,
@@ -66,10 +71,28 @@ Cost fields on `/v1/usage/summary` are populated only for a principal holding
 `billing:admin`.
 """
 
+tripwire_watcher = TripwireDriftWatcher()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    watcher_task = asyncio.create_task(tripwire_watcher.start_background_watcher())
+    try:
+        yield
+    finally:
+        tripwire_watcher.stop()
+        watcher_task.cancel()
+        try:
+            await watcher_task
+        except asyncio.CancelledError:
+            pass
+
+
 app = FastAPI(
     title="AgentShield Enterprise API Gateway",
     version="1.0.0",
     description=API_DESCRIPTION,
+    lifespan=lifespan,
     dependencies=[Depends(verify_rate_limit)],
     openapi_url="/openapi.json",
     docs_url="/docs",
@@ -86,6 +109,8 @@ app.include_router(webhook_router, tags=["webhooks"])
 app.include_router(billing_router)
 app.include_router(metering_router)
 app.include_router(keys_router)
+app.include_router(meta_models_router)  # Meta model API routing
+app.include_router(help_assistant_router)
 # API aliases served to the Angular portal (nginx forwards /api/ unchanged)
 app.include_router(billing_router, prefix="/api")
 app.include_router(metering_router, prefix="/api")

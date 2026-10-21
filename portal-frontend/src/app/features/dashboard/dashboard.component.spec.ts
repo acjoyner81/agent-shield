@@ -84,7 +84,7 @@ describe('Dashboard refresh contract (Spec 0011 AC-5, AC-6)', () => {
   });
 
   afterEach(() => {
-    service.stopAutoRefresh();
+    service.stopUsageAutoRefresh();
     httpMock.verify();
   });
 
@@ -97,7 +97,7 @@ describe('Dashboard refresh contract (Spec 0011 AC-5, AC-6)', () => {
     expect(service.health()).toEqual(HEALTH);
   });
 
-  it('polls both endpoints every 60 seconds', fakeAsync(() => {
+  it('polls usage every 60 seconds', fakeAsync(() => {
     expect(AUTO_REFRESH_INTERVAL_MS).toBe(60000);
 
     const fixture = TestBed.createComponent(DashboardComponent);
@@ -108,19 +108,19 @@ describe('Dashboard refresh contract (Spec 0011 AC-5, AC-6)', () => {
     tick(AUTO_REFRESH_INTERVAL_MS - 1);
     httpMock.expectNone('/api/v1/usage/summary');
 
-    // Due: one poll per endpoint
+    // Due: the dashboard refreshes usage. Health is polled by the app shell.
     tick(1);
     const second = { ...USAGE_ADMIN, totals: { ...USAGE_ADMIN.totals, total_tokens: 8000 } };
-    flushPoll(second);
+    httpMock.expectOne('/api/v1/usage/summary').flush(second);
     expect(service.usage()?.totals.total_tokens).toBe(8000);
 
     // And again on the next tick
     tick(AUTO_REFRESH_INTERVAL_MS);
-    flushPoll(USAGE_ADMIN);
+    httpMock.expectOne('/api/v1/usage/summary').flush(USAGE_ADMIN);
 
     // Stop the poll inside the fake zone, otherwise the pending periodic task
     // outlives the test and leaks two unmatched requests into httpMock.verify().
-    service.stopAutoRefresh();
+    service.stopUsageAutoRefresh();
     expect(service.usage()).toEqual(USAGE_ADMIN);
   }));
 

@@ -246,17 +246,9 @@ while true; do
 
     # Decide whether this cycle should raise an alert.
     #
-    # A violation that nobody has approved yet persists across cycles, so
-    # alerting unconditionally meant one row per CHECK_INTERVAL_SECONDS, all of
-    # them into telemetry_history, which is a single capped list shared by every
-    # tenant. Six consecutive alerts evicted six real tenant audit rows, and a
-    # violation left unattended for a day would post 288 of them and push a
-    # tenant's entire audit history out of the list. A monitor that destroys the
-    # data it exists to protect is worse than no monitor.
-    #
-    # So alert on the transition into a violation, again whenever the count
-    # changes because a different set of files drifted, and otherwise at most
-    # once per ALERT_REPEAT_SECONDS so a long outage still keeps reminding.
+    # Keep local alert output quiet while a violation persists. The gateway
+    # reads each published verdict and independently queues one telemetry event
+    # for a new drift state, with a bounded reminder interval.
     ALERT_REPEAT_SECONDS="${ALERT_REPEAT_SECONDS:-3600}"
     ALERT_STATE_FILE=/var/lib/tripwire/status/alert.state
     NOW=$(date -u +%s)
@@ -276,17 +268,9 @@ while true; do
         fi
         if [ "${SHOULD_ALERT}" -eq 1 ]; then
             if [ "${POLICY_MISMATCH}" -eq 1 ]; then
-                echo "[Tripwire FIM] ALERT: the policy no longer matches the baseline, so nothing was checked!"
-                curl -s -X POST http://agentshield-python-gateway:8000/v1/telemetry/logs \
-                    -H "Content-Type: application/json" \
-                    -d "{\"tenant_id\": \"system\", \"level\": \"CRITICAL\", \"message\": \"Tripwire FIM on ${HOSTNAME}: the policy no longer matches the baseline database, so NO objects were verified this cycle. If twpol.txt was not changed on purpose this is tampering. Rebuild deliberately with docker compose run --rm -e TRIPWIRE_REBUILD_BASELINE=1 tripwire\"}" \
-                    || echo "[Tripwire FIM] Failed to send alert to gateway"
+                echo "[Tripwire FIM] ALERT: policy mismatch, verdict will be read by the gateway watcher."
             else
-                echo "[Tripwire FIM] ALERT: Integrity violation detected (exit ${STATUS})!"
-                curl -s -X POST http://agentshield-python-gateway:8000/v1/telemetry/logs \
-                    -H "Content-Type: application/json" \
-                    -d "{\"tenant_id\": \"system\", \"level\": \"CRITICAL\", \"message\": \"Tripwire FIM on ${HOSTNAME}: ${VIOLATIONS:-?} of ${OBJECTS:-?} monitored objects differ from the approved baseline. Review the report, then run tripwire/approve.sh to accept the change.\"}" \
-                    || echo "[Tripwire FIM] Failed to send alert to gateway"
+                echo "[Tripwire FIM] ALERT: integrity violation detected (exit ${STATUS}); verdict will be read by the gateway watcher."
             fi
         else
             echo "[Tripwire FIM] Violation unchanged since the last alert, not re-alerting (${VIOLATIONS:-?} objects)."
@@ -305,12 +289,10 @@ while true; do
 
     # Publish the verdict where the gateway can read it.
     #
-    # The telemetry alert above lands in the audit stream under tenant_id
-    # "system", which no real tenant ever reads, so the alert was invisible to
-    # every human. Platform integrity is platform health rather than tenant
-    # audit data, so it belongs on the service health surface the dashboard
-    # already renders. A file on a shared volume keeps that honest without
-    # opening another unauthenticated write endpoint for anyone to spoof.
+    # The gateway watcher reads this shared file, sends a system scoped
+    # telemetry event through Redis to the Splunk aggregator, and exposes the
+    # same verdict on the service health surface. This avoids an unauthenticated
+    # write endpoint that any caller could spoof.
     #
     # Written every cycle, including the clean case, because the gateway treats
     # a missing or stale verdict as degraded. A monitor that has died must not

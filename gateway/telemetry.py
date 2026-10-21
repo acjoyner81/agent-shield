@@ -30,6 +30,10 @@ VALID_EVENT_TYPES = {
     "agentshield.security.rate_limit_exceeded",
     "agentshield.security.key_rotation",
     "agentshield.billing.subscription_changed",
+    "agentshield.security.prompt_injection_blocked",
+    "agentshield.security.pii_redacted",
+    "agentshield.meta.model_request_completed",
+    "agentshield.security.system_drift_detected",
 }
 
 
@@ -40,6 +44,10 @@ class EventType(str, Enum):
     RATE_LIMIT_EXCEEDED = "agentshield.security.rate_limit_exceeded"
     KEY_ROTATION = "agentshield.security.key_rotation"
     SUBSCRIPTION_CHANGED = "agentshield.billing.subscription_changed"
+    PROMPT_INJECTION_BLOCKED = "agentshield.security.prompt_injection_blocked"
+    PII_REDACTED = "agentshield.security.pii_redacted"
+    META_MODEL_REQUEST_COMPLETED = "agentshield.meta.model_request_completed"
+    SYSTEM_DRIFT_DETECTED = "agentshield.security.system_drift_detected"
 
 
 class HttpData(BaseModel):
@@ -130,6 +138,14 @@ def _summarize(event_type: str, data: Dict[str, Any]) -> str:
         return "Authorization failed; request denied"
     if event_type == EventType.SUBSCRIPTION_CHANGED.value:
         return f"Subscription {data.get('action', 'changed')}"
+    if event_type == EventType.PROMPT_INJECTION_BLOCKED.value:
+        return "Prompt injection blocked"
+    if event_type == EventType.PII_REDACTED.value:
+        return "PII redacted"
+    if event_type == EventType.META_MODEL_REQUEST_COMPLETED.value:
+        return f"Meta model request completed ({data.get('model', 'unknown model')})"
+    if event_type == EventType.SYSTEM_DRIFT_DETECTED.value:
+        return f"System file integrity drift detected ({data.get('violations', 'unknown')} violations)"
     return event_type
 
 
@@ -275,11 +291,12 @@ def emit_token_usage(
     trace_id: Optional[str] = None,
     span_id: Optional[str] = None,
     redis_client: Optional[Any] = None,
+    total_tokens: Optional[int] = None,
 ) -> str:
     data = TokenData(
         input=input_tokens,
         output=output_tokens,
-        total=input_tokens + output_tokens,
+        total=total_tokens if total_tokens is not None else input_tokens + output_tokens,
         model=model,
     ).model_dump()
     return emit_event(

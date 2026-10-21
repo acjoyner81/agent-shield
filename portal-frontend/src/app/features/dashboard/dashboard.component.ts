@@ -1,7 +1,7 @@
-import { Component, OnDestroy, OnInit, computed, inject } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { CommonModule, DecimalPipe } from '@angular/common';
-import { TelemetryService } from '../../core/services/telemetry.service';
+import { TelemetryService, serviceDisplayName } from '../../core/services/telemetry.service';
 import { NotificationService } from '../../core/errors/error-state.service';
 
 @Component({
@@ -19,10 +19,13 @@ import { NotificationService } from '../../core/errors/error-state.service';
         }
       </div>
       <div class="head-actions">
-        <button class="button button-secondary" type="button" (click)="telemetry.refreshDashboard()">
-          Refresh <span>↻</span>
+        <button class="button button-secondary" type="button" (click)="refreshDashboard()" [disabled]="refreshing()">
+          {{ refreshing() ? 'Refreshing…' : 'Refresh' }} <span>↻</span>
         </button>
-        <button class="button button-primary" type="button">Export report <span>↗</span></button>
+        <button class="button button-primary" type="button" (click)="exportReport()">Export report <span>↗</span></button>
+        @if (refreshMessage()) {
+          <span class="refresh-message" role="status" aria-live="polite">{{ refreshMessage() }}</span>
+        }
       </div>
     </section>
 
@@ -109,7 +112,7 @@ import { NotificationService } from '../../core/errors/error-state.service';
             <div>
               <span class="health-name">
                 <b class="dot" [class.green-dot]="service.status === 'healthy'" [class.coral-dot]="service.status !== 'healthy'"></b>
-                {{ service.name }}
+                {{ serviceDisplayName(service.name) }}
               </span>
               <strong>{{ service.status }}</strong>
               <small>{{ service.latency_ms | number:'1.0-0' }}ms</small>
@@ -179,7 +182,11 @@ import { NotificationService } from '../../core/errors/error-state.service';
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   readonly telemetry = inject(TelemetryService);
+  readonly serviceDisplayName = serviceDisplayName;
+  readonly refreshing = signal(false);
+  readonly refreshMessage = signal('');
   private readonly notifications = inject(NotificationService);
+  private refreshMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * The quiet staleness notes for the two widgets on this page.
@@ -193,13 +200,85 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly usageNote = computed(() => this.notifications.staleNote('usage'));
   readonly healthNote = computed(() => this.notifications.staleNote('health'));
 
+  refreshDashboard(): void {
+    if (this.refreshing()) {
+      return;
+    }
+    if (this.refreshMessageTimer !== null) {
+      clearTimeout(this.refreshMessageTimer);
+      this.refreshMessageTimer = null;
+    }
+    this.refreshing.set(true);
+    this.refreshMessage.set('');
+    this.telemetry.refreshDashboard((success) => {
+      this.refreshing.set(false);
+      this.refreshMessage.set(success ? 'Dashboard updated.' : 'Refresh failed. Showing the last available data.');
+      this.refreshMessageTimer = setTimeout(() => this.refreshMessage.set(''), 5000);
+    });
+  }
+
+  exportReport(): void {
+    const usage = this.telemetry.usage();
+    const health = this.telemetry.health();
+    const rows: unknown[][] = [
+      ['AgentShield dashboard report'],
+      ['Generated at', new Date().toISOString()],
+      ['Tenant', usage?.tenant_id ?? ''],
+      ['Period start', usage?.period_start ?? ''],
+      ['Period end', usage?.period_end ?? ''],
+      ['Total requests', usage?.totals.total_requests ?? ''],
+      ['Total input tokens', usage?.totals.input_tokens ?? ''],
+      ['Total output tokens', usage?.totals.output_tokens ?? ''],
+      ['Total tokens', usage?.totals.total_tokens ?? ''],
+      ['Estimated cost USD', usage?.totals.estimated_cost_usd ?? ''],
+      ['Quality passed', usage?.totals.quality_passed ?? ''],
+      ['Failed requests', usage?.totals.failed_requests ?? ''],
+      ['Rate limited requests', usage?.totals.rate_limited_requests ?? ''],
+      [],
+      ['Model', 'Requests', 'Input tokens', 'Output tokens', 'Total tokens', 'Cost USD'],
+      ...(usage?.by_model ?? []).map((model) => [
+        model.model,
+        model.request_count,
+        model.input_tokens,
+        model.output_tokens,
+        model.total_tokens,
+        model.cost_usd ?? '',
+      ]),
+      [],
+      ['Service', 'Status', 'Latency ms', 'Detail'],
+      ...(health?.services ?? []).map((service) => [
+        serviceDisplayName(service.name),
+        service.status,
+        service.latency_ms,
+        service.detail ?? '',
+      ]),
+    ];
+    const csv = rows.map((row) => row.map((value) => this.csvCell(value)).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `agentshield-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  private csvCell(value: unknown): string {
+    const text = String(value ?? '');
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+
   ngOnInit(): void {
     this.telemetry.fetchRecentLogs();
     this.telemetry.refreshDashboard();
-    this.telemetry.startAutoRefresh();
+    this.telemetry.startUsageAutoRefresh();
   }
 
   ngOnDestroy(): void {
-    this.telemetry.stopAutoRefresh();
+    this.telemetry.stopUsageAutoRefresh();
+    if (this.refreshMessageTimer !== null) {
+      clearTimeout(this.refreshMessageTimer);
+    }
   }
 }

@@ -33,6 +33,10 @@ services:
     ports:
       - "8000:8000"
     environment:
+      BASETEN_API_KEY: ${BASETEN_API_KEY:-}
+      # Empty means use the provider endpoint in agent_shield_config.yaml.
+      META_API_BASE_URL: ${META_API_BASE_URL:-}
+      AGENT_SHIELD_CONFIG_PATH: /app/agent_shield_config.yaml
       REDIS_URL: redis://redis:6379/0
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-dev-zymaiayb0afkpn7n.us.auth0.com}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.agentshield.local}
@@ -56,6 +60,8 @@ services:
       # ever report that shipping cannot be attempted.
       SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:?Set SPLUNK_HEC_TOKEN in .env}
       SPLUNK_HEALTH_MAX_SHIP_AGE_SEC: ${SPLUNK_HEALTH_MAX_SHIP_AGE_SEC:-300}
+      TRIPWIRE_POLL_INTERVAL_SEC: ${TRIPWIRE_POLL_INTERVAL_SEC:-30}
+      TRIPWIRE_ALERT_REPEAT_SEC: ${TRIPWIRE_ALERT_REPEAT_SEC:-3600}
     volumes:
       # Tripwire publishes its integrity verdict on tripwire-data, and the
       # service health surface reports it. Read only, and tripwire-data holds
@@ -66,6 +72,7 @@ services:
       # key stays inside the Splunk container, so this mount hands the gateway a
       # trust anchor and no way to mint a certificate with it.
       - splunk-ca:/etc/agentshield/splunk-ca:ro
+      - ./agent_shield_config.yaml:/app/agent_shield_config.yaml:ro
     depends_on:
       redis:
         condition: service_healthy

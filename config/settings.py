@@ -1,7 +1,14 @@
 """Application configuration loaded from environment variables."""
 
+import os
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import model_validator
+
+from gateway.config_loader import (
+    GUARDRAILS_CONFIG,
+    MODEL_PROVIDER_CONFIG,
+)
 
 
 class Settings(BaseSettings):
@@ -17,6 +24,19 @@ class Settings(BaseSettings):
     auth0_m2m_client_id: str = ""
     auth0_m2m_client_secret: str = ""
     mcp_server_url: str = "http://mcp-server:8081/mcp/v1"
+    baseten_api_key: str = Field(
+        default_factory=lambda: os.getenv(MODEL_PROVIDER_CONFIG["api_key_env"], "")
+    )
+    meta_api_base_url: str = Field(
+        default=MODEL_PROVIDER_CONFIG["base_url"], validation_alias="META_API_BASE_URL"
+    )
+    meta_default_model: str = MODEL_PROVIDER_CONFIG["default_model"]
+    meta_request_timeout_seconds: float = MODEL_PROVIDER_CONFIG["timeout_seconds"]
+    meta_prompt_injection_enabled: bool = GUARDRAILS_CONFIG["ingress"]["prompt_injection"]["enabled"]
+    meta_pii_redaction_enabled: bool = GUARDRAILS_CONFIG["ingress"]["pii_redaction"]["enabled"]
+    meta_pii_mask_patterns: list[str] = GUARDRAILS_CONFIG["ingress"]["pii_redaction"]["mask_patterns"]
+    meta_max_tokens_limit: int = GUARDRAILS_CONFIG["ingress"]["max_tokens_limit"]
+    meta_sanitize_reasoning_content: bool = GUARDRAILS_CONFIG["egress"]["sanitize_reasoning_content"]
     redis_url: str = "redis://localhost:6379/0"
     request_timeout_seconds: int = 60
     default_rate_limit_rpm: int = 60
@@ -48,7 +68,9 @@ class Settings(BaseSettings):
     pro_rpm: int = 100
     enterprise_rpm: int = 1000
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", case_sensitive=False, extra="ignore", env_ignore_empty=True
+    )
 
     @model_validator(mode="after")
     def _refuse_a_webhook_secret_that_cannot_be_one(self) -> "Settings":

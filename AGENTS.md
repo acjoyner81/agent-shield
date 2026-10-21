@@ -43,6 +43,10 @@ Issues and specs live as GitHub issues on `acjoyner81/agent-shield`, driven with
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+## Portal UI conventions
+
+- [docs/portal-ui-design.md](docs/portal-ui-design.md): current portal layout, headers, CSS tokens, responsive behavior, and interaction conventions for future Angular work.
+
 ## Current Progress & Decisions
 - [x] Basic Docker Compose stack (Redis, Splunk, Tripwire, Gateways, Frontend)
 - [x] Splunk platform architecture fix (ARM64 $\rightarrow$ AMD64)
@@ -69,6 +73,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 - `gateway-python` bakes its image at build time and has no source volume, so a running container can be many changes behind. Run `docker compose up -d --build gateway-python` before verifying anything against port 8000, or you will be testing stale code.
 - A Homebrew `redis-server` already holds `127.0.0.1:6379`, so the local `.env` value `redis://localhost:6379` points at a different Redis than the containers use (`redis://redis:6379`). Seeding or inspecting usage from the host silently touches the wrong store and every reading looks empty. Drive the metering functions from inside `gateway-python` instead.
 - `/dashboard`, `/logs`, and `/keys` sit behind the custom guard in `portal-frontend/src/app/core/guards/auth.guard.ts`, which deliberately does not use the stock Auth0 `authGuardFn`: that one answers authentication from a `user` claim a modern ID token does not carry, so it reports a valid session as signed out and restarts the PKCE exchange on every full page load. Driving those routes in a browser does not need a real Auth0 account in `dev-zymaiayb0afkpn7n`: intercept the Auth0 authorize iframe and the token endpoint, return the gateway's dev token `dev-mock-token` as the access token, and echo the request `nonce` in the id token. The frame postMessage target origin has to be the app origin, because `event.origin` is checked against the Auth0 domain. `/pricing` carries no guard at all, so it renders anonymously.
+- The authenticated app shell fetches `/api/v1/health/services` immediately and every 60 seconds, so its status badge stays current on routes beyond the dashboard. The dashboard owns the usage refresh timer; the anonymous `/pricing` route does not poll health.
 - Key writes are the one credential operation that can widen a principal's reach, so `POST /v1/keys` requires the `keys:write` scope *and* only grants scopes the caller already holds. A machine key is a real principal, not a lesser one: it manages keys for its own tenant but can never mint a successor more privileged than itself.
 - The rate limiter is an app-level dependency, so it runs before route auth. It therefore resolves the principal itself (`request.state.principal_verified`, memoized by `resolve_active_tenant`) rather than reading `X-Tenant-ID` or a literal key table; a pre-auth caller can neither debit a bucket nor learn a tenant's budget from a status code.
 - Metering claims an event in `usage:processed_events` and applies its roll-up in one Redis script, because claiming first and writing second stranded a failed event in the ledger, which made the DLQ entry it was routed to redrive as a duplicate and drop the usage permanently. The scripts type check every key before the claim so a rejected event leaves nothing behind. That means the test suite needs `fakeredis[lua]`; install `requirements-dev.txt` or `eval` fails and every metering test fails with it.
@@ -81,3 +86,10 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ## Project Memory
 For quick recall of recent changes, refer to the git history or the `docs/progress.md` (if created).
+
+
+## Meta Hackathon 2026 - Integration Goals
+- [ ] Implement Meta Model API Provider Router in `gateway-python` (Muse Spark 1.3, Muse Code, SAM 3.1)
+- [ ] Add explicit Splunk HEC event triggers for OWASP LLM prompt injection and PII redaction blocks
+- [ ] Connect Tripwire file drift alerts to the agentic tool execution loop (e.g., when Muse Code attempts local edits)
+- [ ] Create Red Team testing harness endpoints for live hackathon demonstration

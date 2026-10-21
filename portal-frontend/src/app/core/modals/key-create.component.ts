@@ -7,11 +7,11 @@ import { FormsModule } from '@angular/forms';
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="modal-backdrop" (click)="onBackdropClick()">
-      <div class="modal-content" (click)="$event.stopPropagation()">
+      <div class="modal-backdrop" (click)="onBackdropClick()">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="create-key-title" (click)="$event.stopPropagation()">
         <div class="modal-header">
-          <h3>Create API Key</h3>
-          <button class="modal-close" (click)="onClose()">&times;</button>
+          <h3 id="create-key-title">Create API Key</h3>
+          <button class="modal-close" type="button" aria-label="Close create API key dialog" (click)="onClose()">&times;</button>
         </div>
         <div class="modal-body">
           <label class="form-label" for="key-name">Key name</label>
@@ -25,8 +25,8 @@ import { FormsModule } from '@angular/forms';
           />
         </div>
         <div class="modal-footer">
-          <button class="btn-secondary" (click)="onCancel()">Cancel</button>
-          <button class="btn-primary" (click)="onCreate()">Create</button>
+          <button class="btn-secondary" type="button" (click)="onCancel()">Cancel</button>
+          <button class="btn-primary" type="button" (click)="onCreate()">Create</button>
         </div>
       </div>
     </div>
@@ -35,18 +35,22 @@ import { FormsModule } from '@angular/forms';
     .modal-backdrop {
       position: fixed;
       inset: 0;
+      padding: 16px;
       background: rgba(0, 0, 0, 0.5);
       display: flex;
       align-items: center;
       justify-content: center;
       z-index: 1000;
+      overflow-y: auto;
     }
     .modal-content {
       background: white;
-      margin: 2rem;
+      margin: auto;
       border-radius: 8px;
-      width: 400px;
-      max-width: 90vw;
+      width: min(400px, 100%);
+      max-height: calc(100vh - 32px);
+      max-height: calc(100dvh - 32px);
+      overflow-y: auto;
       animation: modalIn 0.3s ease-out;
     }
     @keyframes modalIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
@@ -68,6 +72,13 @@ import { FormsModule } from '@angular/forms';
       padding: 24px;
       color: #374151;
     }
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0 24px 20px;
+    }
     .form-label {
       display: block;
       margin-bottom: 8px;
@@ -77,6 +88,7 @@ import { FormsModule } from '@angular/forms';
     }
     .form-input {
       width: 100%;
+      box-sizing: border-box;
       padding: 8px 12px;
       border: 1px solid #d1d5db;
       border-radius: 4px;
@@ -88,7 +100,6 @@ import { FormsModule } from '@angular/forms';
       border: none;
       padding: 8px 16px;
       border-radius: 4px;
-      margin-right: 8px;
       cursor: pointer;
       font-size: 0.875rem;
     }
@@ -100,6 +111,17 @@ import { FormsModule } from '@angular/forms';
       border-radius: 4px;
       cursor: pointer;
       font-size: 0.875rem;
+    }
+    @media (max-width: 480px) {
+      .modal-backdrop { padding: 12px; }
+      .modal-content { max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+      .modal-header { padding: 14px 18px; }
+      .modal-body { padding: 18px; }
+      .modal-footer { padding: 0 18px 18px; }
+    }
+    @media (max-width: 340px) {
+      .modal-footer { flex-direction: column-reverse; }
+      .modal-footer button { width: 100%; }
     }
   `]
 })

@@ -1,9 +1,9 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, HostListener, computed, effect, inject, signal } from '@angular/core';
 import { AsyncPipe } from '@angular/common';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { AuthService } from './core/services/auth.service';
-import { TelemetryService } from './core/services/telemetry.service';
+import { AUTO_REFRESH_INTERVAL_MS, TelemetryService, serviceDisplayName } from './core/services/telemetry.service';
 import { NotificationService } from './core/errors/error-state.service';
 import { NotificationCenter } from './shared/notification-center/notification-center.component';
 
@@ -16,7 +16,41 @@ import { NotificationCenter } from './shared/notification-center/notification-ce
 export class App {
   readonly auth = inject(AuthService);
   private readonly telemetry = inject(TelemetryService);
-  private readonly notifications = inject(NotificationService);
+  readonly notifications = inject(NotificationService);
+  readonly notificationsOpen = signal(false);
+  readonly profileMenuOpen = signal(false);
+  readonly notificationItems = computed(() => {
+    const items: Array<{ label: string; message: string }> = [];
+    const session = this.notifications.sessionNotice();
+    const budget = this.notifications.budgetBanner();
+    const rateLimit = this.notifications.rateLimit();
+    const toast = this.notifications.toast();
+    const health = this.telemetry.health();
+    if (session) items.push({ label: 'Session expired', message: session.message });
+    if (budget) items.push({ label: 'Budget exhausted', message: budget.message });
+    if (rateLimit) items.push({ label: 'Rate limited', message: rateLimit.message });
+    if (toast) items.push({ label: this.notificationLabel(toast.kind), message: toast.message });
+    if (this.notifications.isStale('health')) {
+      items.push({ label: 'Health check out of date', message: 'The latest service health check could not be loaded.' });
+    } else if (health?.overall === 'degraded') {
+      for (const service of health.services.filter((entry) => entry.status === 'degraded')) {
+        items.push({ label: `${serviceDisplayName(service.name)} needs attention`, message: service.detail ?? 'This service is degraded.' });
+      }
+    }
+    return items;
+  });
+  private readonly healthPolling = effect((onCleanup) => {
+    if (!this.auth.authenticated()) {
+      return;
+    }
+
+    this.telemetry.fetchServiceHealth();
+    const refreshHandle = setInterval(
+      () => this.telemetry.fetchServiceHealth(),
+      AUTO_REFRESH_INTERVAL_MS,
+    );
+    onCleanup(() => clearInterval(refreshHandle));
+  });
   readonly pageTitle = inject(Router).events.pipe(filter((event) => event instanceof NavigationEnd), map((event) => this.titleFor((event as NavigationEnd).urlAfterRedirects)));
   private titleFor(url: string): string {
     return url.includes('logs')
@@ -31,6 +65,8 @@ export class App {
               ? 'Evaluations'
               : url.includes('models')
                 ? 'Models & routing'
+                : url.includes('assistant')
+                  ? 'Documentation assistant'
                 : url.includes('docs')
                   ? 'Help center'
                   : 'Overview';
@@ -56,4 +92,34 @@ export class App {
   });
 
   readonly healthStale = computed(() => this.notifications.isStale('health'));
+
+  toggleNotifications(): void {
+    this.notificationsOpen.update((open) => !open);
+  }
+
+  toggleProfileMenu(): void {
+    this.profileMenuOpen.update((open) => !open);
+  }
+
+  closeProfileMenu(): void {
+    this.profileMenuOpen.set(false);
+  }
+
+  @HostListener('document:keydown.escape')
+  closeProfileMenuOnEscape(): void {
+    this.closeProfileMenu();
+  }
+
+  signOut(): void {
+    this.closeProfileMenu();
+    this.auth.logout();
+  }
+
+  private notificationLabel(kind: string): string {
+    switch (kind) {
+      case 'guardrail_blocked': return 'Guardrail alert';
+      case 'scope_denied': return 'Access denied';
+      default: return 'Service alert';
+    }
+  }
 }

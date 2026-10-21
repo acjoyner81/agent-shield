@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "document_id": "getting-started",
+      "title": "Get started with AgentShield",
+      "path": "getting-started.md"
+    }
+  ],
+  "suggestions": [
+    { "question": "How do I create and use an API key?", "section_id": "api-keys" },
+    { "question": "How do I make my first Meta model request?", "section_id": "first-request" },
+    { "question": "Where can I see usage and service health?", "section_id": "usage-health" }
+  ],
+  "abstention_section_id": "troubleshooting",
+  "operation_sections": {
+    "get_usage_summary_endpoint_v1_usage_summary_get": "usage-health",
+    "list_api_keys_v1_keys_get": "api-keys",
+    "create_api_key_v1_keys_post": "api-keys",
+    "rotate_api_key_v1_keys__key_id__rotate_post": "api-keys",
+    "revoke_api_key_v1_keys__key_id__delete": "api-keys",
+    "execute_tool_v1_tools_execute_post": "first-request",
+    "process_llm_request_v1_chat_completions_post": "first-request"
+  }
+}

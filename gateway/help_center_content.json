@@ -1,0 +1,351 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "document_id": "getting-started",
+      "title": "Get started with AgentShield",
+      "sections": [
+        {
+          "section_id": "overview",
+          "heading": "Get started with AgentShield",
+          "body": [
+            "",
+            "AgentShield gives tenant administrators and developers one place to manage API access, route model requests, and review usage and service health.",
+            ""
+          ]
+        },
+        {
+          "section_id": "api-keys",
+          "heading": "API keys",
+          "body": [
+            "",
+            "Create a tenant key from [API keys & access](/keys). Give it a recognizable name, copy the secret when it is shown, and store it in a secret manager. The portal does not show the full secret again. Revoke keys that are no longer needed. Key creation and rotation are restricted to permissions held by the signed-in principal.",
+            ""
+          ]
+        },
+        {
+          "section_id": "first-request",
+          "heading": "Make your first request",
+          "body": [
+            "",
+            "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).",
+            "",
+            "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:",
+            "",
+            "```bash",
+            "curl -X POST http://localhost:8000/v1/meta/chat/completions \\",
+            "  -H 'Content-Type: application/json' \\",
+            "  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\",
+            "  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'",
+            "```",
+            "",
+            "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
+            ""
+          ]
+        },
+        {
+          "section_id": "usage-health",
+          "heading": "Usage and service health",
+          "body": [
+            "",
+            "Open [Overview](/dashboard) for tenant usage and the current service health summary. Open [Observability](/logs) to review recent gateway events. A degraded or stale health result means the latest probe needs attention; check the service detail before treating it as recovered.",
+            ""
+          ]
+        },
+        {
+          "section_id": "troubleshooting",
+          "heading": "Troubleshooting",
+          "body": [
+            "",
+            "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.",
+            "",
+            "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment."
+          ]
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "source_id": "section:overview",
+      "section_id": "overview",
+      "document_id": "getting-started",
+      "title": "Get started with AgentShield",
+      "heading": "Get started with AgentShield",
+      "summary": "",
+      "body": "AgentShield gives tenant administrators and developers one place to manage API access, route model requests, and review usage and service health.",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "AgentShield gives tenant administrators and developers one place to manage API access, route model requests, and review usage and service health.",
+          "parts": [
+            {
+              "text": "AgentShield gives tenant administrators and developers one place to manage API access, route model requests, and review usage and service health."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source_id": "section:api-keys",
+      "section_id": "api-keys",
+      "document_id": "getting-started",
+      "title": "Get started with AgentShield",
+      "heading": "API keys",
+      "summary": "",
+      "body": "Create a tenant key from [API keys & access](/keys). Give it a recognizable name, copy the secret when it is shown, and store it in a secret manager. The portal does not show the full secret again. Revoke keys that are no longer needed. Key creation and rotation are restricted to permissions held by the signed-in principal.",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Create a tenant key from [API keys & access](/keys). Give it a recognizable name, copy the secret when it is shown, and store it in a secret manager. The portal does not show the full secret again. Revoke keys that are no longer needed. Key creation and rotation are restricted to permissions held by the signed-in principal.",
+          "parts": [
+            {
+              "text": "Create a tenant key from "
+            },
+            {
+              "text": "API keys & access",
+              "url": "/keys"
+            },
+            {
+              "text": ". Give it a recognizable name, copy the secret when it is shown, and store it in a secret manager. The portal does not show the full secret again. Revoke keys that are no longer needed. Key creation and rotation are restricted to permissions held by the signed-in principal."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source_id": "section:first-request",
+      "section_id": "first-request",
+      "document_id": "getting-started",
+      "title": "Get started with AgentShield",
+      "heading": "Make your first request",
+      "summary": "",
+      "body": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).\n\nFor the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:\n\n```bash\ncurl -X POST http://localhost:8000/v1/meta/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'\n```\n\nThe gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).",
+          "parts": [
+            {
+              "text": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in "
+            },
+            {
+              "text": "Models & routing",
+              "url": "/models"
+            },
+            {
+              "text": "."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:",
+          "parts": [
+            {
+              "text": "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:"
+            }
+          ]
+        },
+        {
+          "type": "code",
+          "text": "curl -X POST http://localhost:8000/v1/meta/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'"
+        },
+        {
+          "type": "paragraph",
+          "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
+          "parts": [
+            {
+              "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source_id": "section:usage-health",
+      "section_id": "usage-health",
+      "document_id": "getting-started",
+      "title": "Get started with AgentShield",
+      "heading": "Usage and service health",
+      "summary": "",
+      "body": "Open [Overview](/dashboard) for tenant usage and the current service health summary. Open [Observability](/logs) to review recent gateway events. A degraded or stale health result means the latest probe needs attention; check the service detail before treating it as recovered.",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Open [Overview](/dashboard) for tenant usage and the current service health summary. Open [Observability](/logs) to review recent gateway events. A degraded or stale health result means the latest probe needs attention; check the service detail before treating it as recovered.",
+          "parts": [
+            {
+              "text": "Open "
+            },
+            {
+              "text": "Overview",
+              "url": "/dashboard"
+            },
+            {
+              "text": " for tenant usage and the current service health summary. Open "
+            },
+            {
+              "text": "Observability",
+              "url": "/logs"
+            },
+            {
+              "text": " to review recent gateway events. A degraded or stale health result means the latest probe needs attention; check the service detail before treating it as recovered."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source_id": "section:troubleshooting",
+      "section_id": "troubleshooting",
+      "document_id": "getting-started",
+      "title": "Get started with AgentShield",
+      "heading": "Troubleshooting",
+      "summary": "",
+      "body": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.\n\nFor API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment.",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.",
+          "parts": [
+            {
+              "text": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the "
+            },
+            {
+              "text": "Observability",
+              "url": "/logs"
+            },
+            {
+              "text": " page."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment.",
+          "parts": [
+            {
+              "text": "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source_id": "operation:get_usage_summary_endpoint_v1_usage_summary_get",
+      "section_id": "usage-health",
+      "document_id": "api",
+      "title": "AgentShield API",
+      "heading": "Get Usage Summary Endpoint",
+      "summary": "AC-5: Retrieve usage summary for authenticated tenant.\n\nCost fields are populated only for a principal holding billing:admin and\nstay null for everyone else, so usage is never withheld from a tenant\nmember who cannot see spend (Spec 0011 AC-2, AC-6).",
+      "body": "GET /v1/usage/summary Get Usage Summary Endpoint AC-5: Retrieve usage summary for authenticated tenant.\n\nCost fields are populated only for a principal holding billing:admin and\nstay null for everyone else, so usage is never withheld from a tenant\nmember who cannot see spend (Spec 0011 AC-2, AC-6). {\"parameters\": [{\"description\": \"Start date (YYYY-MM-DD)\", \"in\": \"query\", \"name\": \"start_date\", \"required\": false, \"schema\": {\"anyOf\": [{\"type\": \"string\"}, {\"type\": \"null\"}], \"description\": \"Start date (YYYY-MM-DD)\", \"title\": \"Start Date\"}}, {\"description\": \"End date (YYYY-MM-DD)\", \"in\": \"query\", \"name\": \"end_date\", \"required\": false, \"schema\": {\"anyOf\": [{\"type\": \"string\"}, {\"type\": \"null\"}], \"description\": \"End date (YYYY-MM-DD)\", \"title\": \"End Date\"}}], \"responses\": {\"200\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"`cost_usd` and `estimated_cost_usd` are populated only for a principal holding `billing:admin` and stay null otherwise.\", \"summary\": \"Monthly summary for a billing admin\", \"value\": {\"by_model\": [{\"cost_usd\": 0.01, \"input_tokens\": 3000, \"model\": \"gpt-4o\", \"output_tokens\": 2000, \"request_count\": 5, \"total_tokens\": 5000}], \"period_end\": \"2026-09-30\", \"period_start\": \"2026-09-01\", \"tenant_id\": \"tenant_alpha\", \"totals\": {\"estimated_cost_usd\": 0.01, \"failed_requests\": 1, \"input_tokens\": 3000, \"output_tokens\": 2000, \"quality_passed\": 4, \"rate_limited_requests\": 0, \"total_requests\": 5, \"total_tokens\": 5000}}}}, \"schema\": {\"$ref\": \"#/components/schemas/UsageSummaryResponse\"}}}, \"description\": \"Successful Response\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}",
+      "blocks": [],
+      "method": "GET",
+      "path": "/v1/usage/summary",
+      "contract": "{\"parameters\": [{\"description\": \"Start date (YYYY-MM-DD)\", \"in\": \"query\", \"name\": \"start_date\", \"required\": false, \"schema\": {\"anyOf\": [{\"type\": \"string\"}, {\"type\": \"null\"}], \"description\": \"Start date (YYYY-MM-DD)\", \"title\": \"Start Date\"}}, {\"description\": \"End date (YYYY-MM-DD)\", \"in\": \"query\", \"name\": \"end_date\", \"required\": false, \"schema\": {\"anyOf\": [{\"type\": \"string\"}, {\"type\": \"null\"}], \"description\": \"End date (YYYY-MM-DD)\", \"title\": \"End Date\"}}], \"responses\": {\"200\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"`cost_usd` and `estimated_cost_usd` are populated only for a principal holding `billing:admin` and stay null otherwise.\", \"summary\": \"Monthly summary for a billing admin\", \"value\": {\"by_model\": [{\"cost_usd\": 0.01, \"input_tokens\": 3000, \"model\": \"gpt-4o\", \"output_tokens\": 2000, \"request_count\": 5, \"total_tokens\": 5000}], \"period_end\": \"2026-09-30\", \"period_start\": \"2026-09-01\", \"tenant_id\": \"tenant_alpha\", \"totals\": {\"estimated_cost_usd\": 0.01, \"failed_requests\": 1, \"input_tokens\": 3000, \"output_tokens\": 2000, \"quality_passed\": 4, \"rate_limited_requests\": 0, \"total_requests\": 5, \"total_tokens\": 5000}}}}, \"schema\": {\"$ref\": \"#/components/schemas/UsageSummaryResponse\"}}}, \"description\": \"Successful Response\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}"
+    },
+    {
+      "source_id": "operation:list_api_keys_v1_keys_get",
+      "section_id": "api-keys",
+      "document_id": "api",
+      "title": "AgentShield API",
+      "heading": "List Api Keys",
+      "summary": "List all API keys for the authenticated tenant with lifecycle fields.",
+      "body": "GET /v1/keys List Api Keys List all API keys for the authenticated tenant with lifecycle fields. {\"responses\": {\"200\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Only the masked prefix is ever stored and listed. `secret_key` is null outside the creating call.\", \"summary\": \"Key as returned by a list call\", \"value\": [{\"created_at\": \"2026-09-24T10:15:00+00:00\", \"key_id\": \"key_9f3ac21b\", \"key_prefix\": \"sk_live_••••••••••••unqb\", \"name\": \"ci-pipeline\", \"permissions\": [\"tools:execute\"], \"status\": \"Active\", \"version\": 1}]}}, \"schema\": {\"items\": {\"$ref\": \"#/components/schemas/APIKeyResponse\"}, \"title\": \"Response List Api Keys V1 Keys Get\", \"type\": \"array\"}}}, \"description\": \"Successful Response\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}",
+      "blocks": [],
+      "method": "GET",
+      "path": "/v1/keys",
+      "contract": "{\"responses\": {\"200\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Only the masked prefix is ever stored and listed. `secret_key` is null outside the creating call.\", \"summary\": \"Key as returned by a list call\", \"value\": [{\"created_at\": \"2026-09-24T10:15:00+00:00\", \"key_id\": \"key_9f3ac21b\", \"key_prefix\": \"sk_live_••••••••••••unqb\", \"name\": \"ci-pipeline\", \"permissions\": [\"tools:execute\"], \"status\": \"Active\", \"version\": 1}]}}, \"schema\": {\"items\": {\"$ref\": \"#/components/schemas/APIKeyResponse\"}, \"title\": \"Response List Api Keys V1 Keys Get\", \"type\": \"array\"}}}, \"description\": \"Successful Response\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}"
+    },
+    {
+      "source_id": "operation:create_api_key_v1_keys_post",
+      "section_id": "api-keys",
+      "document_id": "api",
+      "title": "AgentShield API",
+      "heading": "Create Api Key",
+      "summary": "Generate a new API key for the tenant, storing only its digest.\n\nKey management requires `keys:write`, and a principal may only grant scopes it\nholds itself, so no credential can mint a successor more privileged than the\ncaller (spec 0012 review blocker).",
+      "body": "POST /v1/keys Create Api Key Generate a new API key for the tenant, storing only its digest.\n\nKey management requires `keys:write`, and a principal may only grant scopes it\nholds itself, so no credential can mint a successor more privileged than the\ncaller (spec 0012 review blocker). {\"requestBody\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Grant only the scopes the integration actually needs.\", \"summary\": \"Create a key that may execute tools\", \"value\": {\"name\": \"ci-pipeline\", \"permissions\": [\"tools:execute\"]}}, \"example_2\": {\"description\": \"Read only. Suitable for usage reporting integrations.\", \"summary\": \"Create a key with no scopes\", \"value\": {\"name\": \"usage-reporter\", \"permissions\": []}}}, \"schema\": {\"$ref\": \"#/components/schemas/APIKeyCreateRequest\"}}}, \"required\": true}, \"responses\": {\"201\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Only the masked prefix is ever stored and listed. `secret_key` is null outside the creating call.\", \"summary\": \"Key as returned by a list call\", \"value\": {\"created_at\": \"2026-09-24T10:15:00+00:00\", \"key_id\": \"key_9f3ac21b\", \"key_prefix\": \"sk_live_••••••••••••unqb\", \"name\": \"ci-pipeline\", \"permissions\": [\"tools:execute\"], \"status\": \"Active\", \"version\": 1}}}, \"schema\": {\"$ref\": \"#/components/schemas/APIKeyResponse\"}}}, \"description\": \"Successful Response\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}",
+      "blocks": [],
+      "method": "POST",
+      "path": "/v1/keys",
+      "contract": "{\"requestBody\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Grant only the scopes the integration actually needs.\", \"summary\": \"Create a key that may execute tools\", \"value\": {\"name\": \"ci-pipeline\", \"permissions\": [\"tools:execute\"]}}, \"example_2\": {\"description\": \"Read only. Suitable for usage reporting integrations.\", \"summary\": \"Create a key with no scopes\", \"value\": {\"name\": \"usage-reporter\", \"permissions\": []}}}, \"schema\": {\"$ref\": \"#/components/schemas/APIKeyCreateRequest\"}}}, \"required\": true}, \"responses\": {\"201\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Only the masked prefix is ever stored and listed. `secret_key` is null outside the creating call.\", \"summary\": \"Key as returned by a list call\", \"value\": {\"created_at\": \"2026-09-24T10:15:00+00:00\", \"key_id\": \"key_9f3ac21b\", \"key_prefix\": \"sk_live_••••••••••••unqb\", \"name\": \"ci-pipeline\", \"permissions\": [\"tools:execute\"], \"status\": \"Active\", \"version\": 1}}}, \"schema\": {\"$ref\": \"#/components/schemas/APIKeyResponse\"}}}, \"description\": \"Successful Response\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}"
+    },
+    {
+      "source_id": "operation:rotate_api_key_v1_keys__key_id__rotate_post",
+      "section_id": "api-keys",
+      "document_id": "api",
+      "title": "AgentShield API",
+      "heading": "Rotate Api Key",
+      "summary": "Rotate a key: mark it Rotated with a grace window and mint a successor.\n\nThe read-check-write runs under WATCH on the tenant key hash so two\nconcurrent rotates cannot both mint a successor (TOCTOU guard).",
+      "body": "POST /v1/keys/{key_id}/rotate Rotate Api Key Rotate a key: mark it Rotated with a grace window and mint a successor.\n\nThe read-check-write runs under WATCH on the tenant key hash so two\nconcurrent rotates cannot both mint a successor (TOCTOU guard). {\"parameters\": [{\"in\": \"path\", \"name\": \"key_id\", \"required\": true, \"schema\": {\"title\": \"Key Id\", \"type\": \"string\"}}], \"requestBody\": {\"content\": {\"application/json\": {\"schema\": {\"anyOf\": [{\"$ref\": \"#/components/schemas/RotateKeyRequest\"}, {\"type\": \"null\"}], \"title\": \"Body\"}}}}, \"responses\": {\"200\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Only the masked prefix is ever stored and listed. `secret_key` is null outside the creating call.\", \"summary\": \"Key as returned by a list call\", \"value\": {\"created_at\": \"2026-09-24T10:15:00+00:00\", \"key_id\": \"key_9f3ac21b\", \"key_prefix\": \"sk_live_••••••••••••unqb\", \"name\": \"ci-pipeline\", \"permissions\": [\"tools:execute\"], \"status\": \"Active\", \"version\": 1}}}, \"schema\": {\"$ref\": \"#/components/schemas/APIKeyResponse\"}}}, \"description\": \"Successful Response\"}, \"401\": {\"description\": \"Not authenticated, or the key is revoked or its grace period expired.\"}, \"404\": {\"description\": \"No such API key for the authenticated tenant.\"}, \"409\": {\"description\": \"The key is already rotated or revoked and cannot be rotated again.\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}",
+      "blocks": [],
+      "method": "POST",
+      "path": "/v1/keys/{key_id}/rotate",
+      "contract": "{\"parameters\": [{\"in\": \"path\", \"name\": \"key_id\", \"required\": true, \"schema\": {\"title\": \"Key Id\", \"type\": \"string\"}}], \"requestBody\": {\"content\": {\"application/json\": {\"schema\": {\"anyOf\": [{\"$ref\": \"#/components/schemas/RotateKeyRequest\"}, {\"type\": \"null\"}], \"title\": \"Body\"}}}}, \"responses\": {\"200\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Only the masked prefix is ever stored and listed. `secret_key` is null outside the creating call.\", \"summary\": \"Key as returned by a list call\", \"value\": {\"created_at\": \"2026-09-24T10:15:00+00:00\", \"key_id\": \"key_9f3ac21b\", \"key_prefix\": \"sk_live_••••••••••••unqb\", \"name\": \"ci-pipeline\", \"permissions\": [\"tools:execute\"], \"status\": \"Active\", \"version\": 1}}}, \"schema\": {\"$ref\": \"#/components/schemas/APIKeyResponse\"}}}, \"description\": \"Successful Response\"}, \"401\": {\"description\": \"Not authenticated, or the key is revoked or its grace period expired.\"}, \"404\": {\"description\": \"No such API key for the authenticated tenant.\"}, \"409\": {\"description\": \"The key is already rotated or revoked and cannot be rotated again.\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}"
+    },
+    {
+      "source_id": "operation:revoke_api_key_v1_keys__key_id__delete",
+      "section_id": "api-keys",
+      "document_id": "api",
+      "title": "AgentShield API",
+      "heading": "Revoke Api Key",
+      "summary": "Revoke a key immediately, persisting it as a Revoked tombstone.",
+      "body": "DELETE /v1/keys/{key_id} Revoke Api Key Revoke a key immediately, persisting it as a Revoked tombstone. {\"parameters\": [{\"in\": \"path\", \"name\": \"key_id\", \"required\": true, \"schema\": {\"title\": \"Key Id\", \"type\": \"string\"}}], \"responses\": {\"204\": {\"description\": \"Successful Response\"}, \"401\": {\"description\": \"Not authenticated.\"}, \"404\": {\"description\": \"No such API key for the authenticated tenant.\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}",
+      "blocks": [],
+      "method": "DELETE",
+      "path": "/v1/keys/{key_id}",
+      "contract": "{\"parameters\": [{\"in\": \"path\", \"name\": \"key_id\", \"required\": true, \"schema\": {\"title\": \"Key Id\", \"type\": \"string\"}}], \"responses\": {\"204\": {\"description\": \"Successful Response\"}, \"401\": {\"description\": \"Not authenticated.\"}, \"404\": {\"description\": \"No such API key for the authenticated tenant.\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}"
+    },
+    {
+      "source_id": "operation:execute_tool_v1_tools_execute_post",
+      "section_id": "first-request",
+      "document_id": "api",
+      "title": "AgentShield API",
+      "heading": "Execute a tenant tool",
+      "summary": "Invoke a tool registered on the MCP server on behalf of the authenticated tenant.\n\nThe endpoint calls the standard MCP streamable transport. Requires the `tools:execute` scope.\nA principal without it receives `403` and an authz failure event is emitted\nto telemetry. The W3C `traceparent` header is forwarded to the MCP server and\nechoed back as `trace_id`.",
+      "body": "POST /v1/tools/execute Execute a tenant tool Invoke a tool registered on the MCP server on behalf of the authenticated tenant.\n\nThe endpoint calls the standard MCP streamable transport. Requires the `tools:execute` scope.\nA principal without it receives `403` and an authz failure event is emitted\nto telemetry. The W3C `traceparent` header is forwarded to the MCP server and\nechoed back as `trace_id`. {\"parameters\": [{\"in\": \"header\", \"name\": \"traceparent\", \"required\": false, \"schema\": {\"anyOf\": [{\"type\": \"string\"}, {\"type\": \"null\"}], \"title\": \"Traceparent\"}}], \"requestBody\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"`params` is passed through to the MCP server as the tool arguments.\", \"summary\": \"Invoke a registered tool\", \"value\": {\"params\": {\"order_id\": \"ORD-1042\"}, \"tool_name\": \"lookup_order\"}}}, \"schema\": {\"$ref\": \"#/components/schemas/ToolRequest\"}}}, \"required\": true}, \"responses\": {\"200\": {\"content\": {\"application/json\": {\"schema\": {\"additionalProperties\": true, \"title\": \"Response Execute Tool V1 Tools Execute Post\", \"type\": \"object\"}}}, \"description\": \"The tool result envelope, including the trace id\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}",
+      "blocks": [],
+      "method": "POST",
+      "path": "/v1/tools/execute",
+      "contract": "{\"parameters\": [{\"in\": \"header\", \"name\": \"traceparent\", \"required\": false, \"schema\": {\"anyOf\": [{\"type\": \"string\"}, {\"type\": \"null\"}], \"title\": \"Traceparent\"}}], \"requestBody\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"`params` is passed through to the MCP server as the tool arguments.\", \"summary\": \"Invoke a registered tool\", \"value\": {\"params\": {\"order_id\": \"ORD-1042\"}, \"tool_name\": \"lookup_order\"}}}, \"schema\": {\"$ref\": \"#/components/schemas/ToolRequest\"}}}, \"required\": true}, \"responses\": {\"200\": {\"content\": {\"application/json\": {\"schema\": {\"additionalProperties\": true, \"title\": \"Response Execute Tool V1 Tools Execute Post\", \"type\": \"object\"}}}, \"description\": \"The tool result envelope, including the trace id\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}"
+    },
+    {
+      "source_id": "operation:process_llm_request_v1_chat_completions_post",
+      "section_id": "first-request",
+      "document_id": "api",
+      "title": "AgentShield API",
+      "heading": "Run a guarded chat completion",
+      "summary": "Send a prompt or message history to the model under the tenant's guardrails.\n\nRequests are scanned for prompt injection, checked against the tenant quota and\ndaily budget, served from the semantic cache when possible, and metered. Returns\n`402` when the daily budget is exhausted and `429` when the rate limit is hit.",
+      "body": "POST /v1/chat/completions Run a guarded chat completion Send a prompt or message history to the model under the tenant's guardrails.\n\nRequests are scanned for prompt injection, checked against the tenant quota and\ndaily budget, served from the semantic cache when possible, and metered. Returns\n`402` when the daily budget is exhausted and `429` when the rate limit is hit. {\"requestBody\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Single turn request using the prompt shorthand.\", \"summary\": \"Simple prompt\", \"value\": {\"model\": \"gpt-4o\", \"prompt\": \"Summarize yesterday's support tickets\", \"temperature\": 0.7}}, \"example_2\": {\"description\": \"Multi turn request. `messages` takes precedence over `prompt`.\", \"summary\": \"Full message history\", \"value\": {\"messages\": [{\"content\": \"You are a support assistant.\", \"role\": \"system\"}, {\"content\": \"Summarize ticket 4471.\", \"role\": \"user\"}], \"model\": \"gpt-4o\", \"temperature\": 0.2}}}, \"schema\": {\"$ref\": \"#/components/schemas/LLMRequest\"}}}, \"required\": true}, \"responses\": {\"200\": {\"content\": {\"application/json\": {\"schema\": {\"additionalProperties\": true, \"title\": \"Response Process Llm Request V1 Chat Completions Post\", \"type\": \"object\"}}}, \"description\": \"The completion envelope with the cost charged to the tenant\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}",
+      "blocks": [],
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "contract": "{\"requestBody\": {\"content\": {\"application/json\": {\"examples\": {\"example_1\": {\"description\": \"Single turn request using the prompt shorthand.\", \"summary\": \"Simple prompt\", \"value\": {\"model\": \"gpt-4o\", \"prompt\": \"Summarize yesterday's support tickets\", \"temperature\": 0.7}}, \"example_2\": {\"description\": \"Multi turn request. `messages` takes precedence over `prompt`.\", \"summary\": \"Full message history\", \"value\": {\"messages\": [{\"content\": \"You are a support assistant.\", \"role\": \"system\"}, {\"content\": \"Summarize ticket 4471.\", \"role\": \"user\"}], \"model\": \"gpt-4o\", \"temperature\": 0.2}}}, \"schema\": {\"$ref\": \"#/components/schemas/LLMRequest\"}}}, \"required\": true}, \"responses\": {\"200\": {\"content\": {\"application/json\": {\"schema\": {\"additionalProperties\": true, \"title\": \"Response Process Llm Request V1 Chat Completions Post\", \"type\": \"object\"}}}, \"description\": \"The completion envelope with the cost charged to the tenant\"}, \"422\": {\"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/HTTPValidationError\"}}}, \"description\": \"Validation Error\"}}, \"security\": [{\"bearer\": []}, {\"apiKey\": []}]}"
+    }
+  ],
+  "suggestions": [
+    {
+      "question": "How do I create and use an API key?",
+      "section_id": "api-keys"
+    },
+    {
+      "question": "How do I make my first Meta model request?",
+      "section_id": "first-request"
+    },
+    {
+      "question": "Where can I see usage and service health?",
+      "section_id": "usage-health"
+    }
+  ],
+  "abstention_section_id": "troubleshooting",
+  "operation_sections": {
+    "get_usage_summary_endpoint_v1_usage_summary_get": "usage-health",
+    "list_api_keys_v1_keys_get": "api-keys",
+    "create_api_key_v1_keys_post": "api-keys",
+    "rotate_api_key_v1_keys__key_id__rotate_post": "api-keys",
+    "revoke_api_key_v1_keys__key_id__delete": "api-keys",
+    "execute_tool_v1_tools_execute_post": "first-request",
+    "process_llm_request_v1_chat_completions_post": "first-request"
+  }
+}

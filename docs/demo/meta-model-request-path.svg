@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 500" role="img" aria-labelledby="title description">
+  <title id="title">AgentShield Meta model request path</title>
+  <desc id="description">A tenant request passes authentication and ingress guardrails before Baseten inference. AgentShield filters the response before returning it. Audit events flow through Redis to Splunk, while Tripwire reports file integrity status to gateway health.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#52677f" />
+    </marker>
+    <marker id="arrow-teal" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#138a78" />
+    </marker>
+    <style>
+      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172b3a; }
+      .surface { fill: #f5f8fb; stroke: #d5e0e9; stroke-width: 2; }
+      .provider { fill: #eef3ff; stroke: #5271b8; stroke-width: 2; }
+      .security { fill: #eaf7f3; stroke: #138a78; stroke-width: 2; }
+      .ops { fill: #fff; stroke: #aab9c8; stroke-width: 2; }
+      .title { font-size: 19px; font-weight: 700; }
+      .detail { font-size: 14px; fill: #52677f; }
+      .section { font-size: 15px; font-weight: 700; letter-spacing: 1px; fill: #52677f; }
+      .line { stroke: #52677f; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .audit-line { stroke: #138a78; stroke-width: 3; stroke-dasharray: 8 7; fill: none; marker-end: url(#arrow-teal); }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="1398" height="498" rx="20" fill="#f9fbfd" stroke="#d5e0e9" stroke-width="2" />
+
+  <text class="section" x="38" y="42">INFERENCE REQUEST</text>
+  <g>
+    <rect class="surface" x="38" y="72" width="174" height="122" rx="14" />
+    <text class="title" x="125" y="112" text-anchor="middle">Client or agent</text>
+    <text class="detail" x="125" y="143" text-anchor="middle">Tenant JWT or API key</text>
+
+    <rect class="security" x="258" y="72" width="174" height="122" rx="14" />
+    <text class="title" x="345" y="112" text-anchor="middle">Tenant auth</text>
+    <text class="detail" x="345" y="143" text-anchor="middle">Resolve tenant identity</text>
+
+    <rect class="security" x="478" y="72" width="174" height="122" rx="14" />
+    <text class="title" x="565" y="105" text-anchor="middle">Ingress guardrails</text>
+    <text class="detail" x="565" y="132" text-anchor="middle">Scan prompt injection</text>
+    <text class="detail" x="565" y="153" text-anchor="middle">Redact configured PII</text>
+
+    <rect class="provider" x="698" y="72" width="174" height="122" rx="14" />
+    <text class="title" x="785" y="105" text-anchor="middle">Baseten inference</text>
+    <text class="detail" x="785" y="132" text-anchor="middle">POST /v1/meta/chat/</text>
+    <text class="detail" x="785" y="153" text-anchor="middle">completions</text>
+
+    <rect class="security" x="918" y="72" width="174" height="122" rx="14" />
+    <text class="title" x="1005" y="105" text-anchor="middle">Egress filtering</text>
+    <text class="detail" x="1005" y="132" text-anchor="middle">Redact PII</text>
+    <text class="detail" x="1005" y="153" text-anchor="middle">Remove reasoning fields</text>
+
+    <rect class="surface" x="1138" y="72" width="224" height="122" rx="14" />
+    <text class="title" x="1250" y="112" text-anchor="middle">Filtered response</text>
+    <text class="detail" x="1250" y="143" text-anchor="middle">Returned to the tenant</text>
+  </g>
+  <path class="line" d="M212 133H250" />
+  <path class="line" d="M432 133H470" />
+  <path class="line" d="M652 133H690" />
+  <path class="line" d="M872 133H910" />
+  <path class="line" d="M1092 133H1130" />
+
+  <text class="section" x="38" y="260">AUDIT AND INTEGRITY</text>
+  <path class="audit-line" d="M345 194V292H235V318" />
+  <path class="audit-line" d="M345 292H550V318" />
+  <g>
+    <rect class="ops" x="72" y="318" width="326" height="112" rx="14" />
+    <text class="title" x="235" y="358" text-anchor="middle">Redis telemetry queue</text>
+    <text class="detail" x="235" y="389" text-anchor="middle">Security and request audit events</text>
+
+    <rect class="ops" x="448" y="318" width="326" height="112" rx="14" />
+    <text class="title" x="611" y="358" text-anchor="middle">Async telemetry worker</text>
+    <text class="detail" x="611" y="389" text-anchor="middle">Ships structured events to Splunk HEC</text>
+
+    <rect class="ops" x="824" y="318" width="230" height="112" rx="14" />
+    <text class="title" x="939" y="358" text-anchor="middle">Tripwire</text>
+    <text class="detail" x="939" y="389" text-anchor="middle">File integrity monitoring</text>
+
+    <rect class="security" x="1104" y="318" width="230" height="112" rx="14" />
+    <text class="title" x="1219" y="358" text-anchor="middle">Gateway health</text>
+    <text class="detail" x="1219" y="389" text-anchor="middle">Publishes Tripwire verdict</text>
+  </g>
+  <path class="audit-line" d="M398 374H440" />
+  <path class="audit-line" d="M774 374H816" />
+  <path class="audit-line" d="M1054 374H1096" />
+  <text class="detail" x="700" y="468" text-anchor="middle">Provider credentials stay in the gateway; prompt and response guardrails run at the gateway boundary.</text>
+</svg>

@@ -1,1 +1,15 @@
-<p>docs works!</p>
+<section class="page-head"><div><p class="eyebrow">Platform / documentation</p><h1>Help center</h1><p class="subhead">Get started, make your first request, and understand usage and service health.</p></div><a class="button button-primary" routerLink="/assistant">Ask the documentation assistant ↗</a></section>
+@if (error()) {<section class="panel docs-error" role="alert">Help content is unavailable right now. Refresh the page to try again.</section>}
+@for (document of corpus()?.documents ?? []; track document.document_id) {
+  <article class="docs-document"><h2>{{ document.title }}</h2>
+    @for (section of document.sections; track section.section_id) {
+      <section class="docs-section" [id]="section.section_id"><h3>{{ section.heading }}</h3>
+        @for (block of section.blocks; track $index) {
+          @if (block.type === 'paragraph') {<p>@for (part of block.parts ?? []; track $index) {@if (part.url?.startsWith('/')) {<a [routerLink]="part.url">{{ part.text }}</a>} @else {{{ part.text }}}}</p>}
+          @if (block.type === 'code') {<pre><code>{{ block.text }}</code></pre>}
+          @if (block.type === 'list') {<ul>@for (item of block.items ?? []; track $index) {<li>{{ item }}</li>}</ul>}
+        }
+      </section>
+    }
+  </article>
+}

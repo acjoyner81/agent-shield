@@ -1,0 +1,23 @@
+<section class="page-head assistant-head">
+  <div><p class="eyebrow">Help center / assistant</p><h1>Documentation assistant</h1><p class="subhead">Answers are grounded in AgentShield's approved public documentation.</p></div>
+  <button class="button button-secondary" type="button" (click)="clear()" [disabled]="loading() && !messages().length">Clear conversation</button>
+</section>
+<section class="assistant-panel" aria-label="Documentation assistant">
+  <div class="privacy-note">Your question and recent chat are sent to the configured model provider to generate an answer. AgentShield does not retain or log chat text.</div>
+  @if (messages().length === 0) {
+    <div class="suggestions"><h2>What can I help you find?</h2><div>@for (item of corpus()?.suggestions ?? []; track item.question) {<button type="button" (click)="useSuggestion(item.question)">{{ item.question }}</button>}</div></div>
+  }
+  <div class="thread" aria-live="polite">
+    @for (message of messages(); track $index) {
+      <article class="message" [class.message-user]="message.role === 'user'"><p class="message-role">{{ message.role === 'user' ? 'You' : 'AgentShield assistant' }}</p>
+        @if (message.paragraphs?.length) { @for (paragraph of message.paragraphs; track $index) {<p class="answer-paragraph">{{ paragraph.text }}</p><div class="citations">@for (sourceId of paragraph.source_ids; track sourceId) {@for (citation of message.citations ?? []; track citation.source_id) {@if (citation.source_id === sourceId) {<a [routerLink]="citation.url">{{ citation.title }} ↗</a>}}}</div>} }
+        @else {<p>{{ message.content }}</p>}
+        @if (message.usage) {<p class="usage-note">@if (message.usage.input_tokens !== null && message.usage.output_tokens !== null) {<span>Tokens: {{ message.usage.input_tokens }} in / {{ message.usage.output_tokens }} out · </span>}@if (message.usage.cost_usd !== null) {<span>Cost: ${{ message.usage.cost_usd }}</span>} @else {<span>Cost unavailable</span>}</p>}
+      </article>
+    }
+    @if (loading()) {<p class="loading" role="status">Searching approved docs and preparing an answer…</p>}
+  </div>
+  @if (error()) {<div class="inline-error" role="alert"><span>{{ error() }} @if (retryWait() > 0) { Retry available in {{ retryWait() }}s.}</span><button class="button button-secondary" type="button" (click)="retry()" [disabled]="loading() || retryWait() > 0">Retry</button></div>}
+  <form class="composer" (submit)="$event.preventDefault(); submit()"><label class="visually-hidden" for="assistant-question">Ask about AgentShield</label><textarea id="assistant-question" [value]="draft()" (input)="draft.set($any($event.target).value)" maxlength="4000" rows="3" placeholder="Ask about API keys, your first request, usage, or service health" [disabled]="loading()"></textarea><button class="button button-primary" type="submit" [disabled]="loading() || retryWait() > 0 || !draft().trim()">{{ loading() ? 'Working…' : 'Ask' }}</button></form>
+  <p class="assistant-footnote"><a routerLink="/docs">Browse the Help Center</a> · The assistant only uses approved documentation and may not verify every detail.</p>
+</section>

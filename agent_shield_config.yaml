@@ -1,0 +1,43 @@
+version: "2.0"
+environment: "meta-hackathon-2026"
+
+gateway:
+  host: "0.0.0.0"
+  port: 8000
+  log_level: "INFO"
+
+models:
+  default_provider: "baseten"
+  providers:
+    baseten:
+      base_url: "https://inference.baseten.co/v1"
+      api_key_env: "BASETEN_API_KEY"
+      default_model: "meta-models/muse-spark-open"
+      timeout_seconds: 30.0
+
+guardrails:
+  ingress:
+    pii_redaction:
+      enabled: true
+      mask_patterns: ["email", "ssn", "api_key", "credit_card"]
+      action: "redact"
+    prompt_injection:
+      enabled: true
+      action: "block"
+    max_tokens_limit: 4096
+  egress:
+    sanitize_reasoning_content: true
+
+splunk_logging:
+  # Splunk shipping is configured by docker-compose.yml and the aggregator.
+  # This section is retained as integration metadata and is not loaded by the gateway.
+  enabled: true
+  hec_url_env_var: "SPLUNK_HEC_URL"
+  hec_token_env_var: "SPLUNK_HEC_TOKEN"
+  index: "agent_shield_security"
+
+tripwire:
+  # Tripwire monitoring paths are defined by the Tripwire container and policy.
+  # This section is retained as integration metadata and is not loaded by the gateway.
+  enabled: true
+  watch_directories: ["./src", "./config"]

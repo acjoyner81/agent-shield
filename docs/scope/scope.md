@@ -20,7 +20,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 6 | Hybrid Stripe Integration | Slice 3 | in-progress |
 | 7 | Tenant Rate Limiting | Slice 3 | done |
 | 8 | Usage Metering | Slice 3 | done |
-| 9 | Admin Dashboard | Slice 4 | in-progress |
+| 9 | Admin Dashboard | Slice 4 | done |
 | 10 | Public API | Slice 4 | done |
 | 11 | API Key Rotation | Slice 4 | done |
 | 12 | UI Error Handling | Slice 4 | done |
@@ -31,6 +31,8 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 17 | Stripe Metered Usage Reporting | Slice 3 | planned |
 | 18 | Prompt Tester for Guardrails | Slice 4 | planned |
 | 19 | Java Gateway Core Logic | Slice 5 | done |
+| 20 | Portal Help Center | Slice 4 | in-progress |
+| 21 | Documentation Assistant | Slice 4 | in-progress |
 
 ## Foundations
 
@@ -177,7 +179,7 @@ Spec 0009 · `docs/specs/0009-usage-metering-engine/index.md` · code in `gatewa
 
 ## Slice 4: Tenant Experience
 
-### 9. Admin Dashboard · in-progress (verified)
+### 9. Admin Dashboard · done
 Create Angular components for the portal to display daily token consumption and estimated costs.
 **Done when:** a tenant admin can see their usage metrics on the dashboard.
 - [x] Design it (spec): `/architect admin dashboard` → Spec 0011
@@ -249,6 +251,32 @@ Stamp a pass or fail on completed requests so the dashboard's quality pass rate 
 Give the 400 guardrail path a surface that exercises it end to end, so a blocked prompt is reachable in the product instead of only in tests.
 **Done when:** an operator can submit a prompt in the portal, see it blocked by the guardrail with the reason named on screen, and see the telemetry event that followed.
 - [ ] Build it: `/develop prompt tester for guardrails`
+
+### 20. Portal Help Center · in-progress
+Replace the `/docs` placeholder with practical help content for using AgentShield.
+**Done when:** a tenant can use the Help Center to understand the portal and safely get started with the gateway.
+- [x] Design it (spec): `/architect portal help center` → Spec 0016
+- [ ] Build it: `/develop portal help center`
+  - [ ] Add the public page shell and ordered section navigation (AC-1, AC-2, AC-9)
+  - [ ] Add safe API key verification and Baseten Meta request guidance (AC-3, AC-4, AC-5)
+  - [ ] Add usage, health, and troubleshooting links and explanations (AC-6, AC-7)
+  - [ ] Preserve public access without tenant data requests (AC-8)
+- [ ] Verify it: `/check verify portal help center`
+- [ ] Test it: `/test portal help center`
+Spec 0016 · [`docs/specs/0016-portal-help-center.md`](../specs/0016-portal-help-center.md)
+
+### 21. Documentation Assistant · in-progress
+Give signed in tenant users a cited assistant for using the portal and API, grounded in the same curated public documentation shown in the Help Center.
+**Done when:** a tenant user can ask a bounded question, receive a safe answer with validated local documentation citations or a clear abstention, and see usage without prompt text being retained or logged.
+- [x] Design it (spec): `/architect documentation assistant` → Spec 0017
+- Spec 0017 · [`docs/specs/0017-docs-assistant.md`](../specs/0017-docs-assistant.md)
+- [ ] Build it: `/develop documentation assistant`
+  - [x] Generate the public Help Center and retrieval corpus from the shared Markdown manifest, with stable IDs and API operation mappings (AC-2, AC-3, AC-4)
+  - [x] Build the authenticated assistant endpoint with bounded history, gateway guardrails, configured Meta inference, citations, and safe failure behavior (AC-3, AC-5, AC-6, AC-7, AC-9)
+  - [x] Record content safe request telemetry and available token usage, keeping missing counts and unpriced cost unavailable (AC-8)
+  - [x] Build the signed in Assistant page with navigation, suggestions, cited thread, loading, retry, clear, and responsive behavior (AC-1, AC-4, AC-5)
+- [ ] Verify it: `/check verify documentation assistant`
+- [ ] Test it: `/test documentation assistant`
 
 ### 19. Java Gateway Core Logic · done · Slice 5
 

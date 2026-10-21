@@ -1,8 +1,7 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { AgGridAngular } from 'ag-grid-angular';
 import type { ColDef } from 'ag-grid-community';
 import { themeQuartz } from 'ag-grid-community';
-import { computed } from '@angular/core';
 import {
   TelemetryLog,
   TelemetryService,
@@ -34,7 +33,7 @@ import { NotificationService } from '../../core/errors/error-state.service';
     <section class="log-summary">
       <div>
         <span>Events in view</span>
-        <strong>{{ telemetry.logs().length }}</strong>
+        <strong>{{ filteredLogs().length }}</strong>
       </div>
       <div>
         <span>Rate limit drops</span
@@ -49,23 +48,27 @@ import { NotificationService } from '../../core/errors/error-state.service';
     <section class="panel grid-panel">
       <div class="grid-toolbar">
         <div class="toolbar-search">
-          ⌕ <input placeholder="Filter events, tenants, traces..." />
+          ⌕ <input
+            aria-label="Filter events, tenants, and traces"
+            placeholder="Filter events, tenants, traces..."
+            [value]="searchTerm()"
+            (input)="onSearchInput($event)"
+          />
         </div>
         <div class="toolbar-meta">
           <span class="live-pill"><b></b> Polling every 60s</span
           ><button class="select-button">All tenants ⌄</button>
         </div>
       </div>
-      @if (telemetry.logsLoaded() && telemetry.logs().length === 0) {
+      @if (telemetry.logsLoaded() && filteredLogs().length === 0) {
         <p class="empty-state">
-          No telemetry for this tenant yet. Events appear here once a request has
-          been metered.
+          {{ searchTerm() ? 'No events match this filter.' : 'No telemetry for this tenant yet. Events appear here once a request has been metered.' }}
         </p>
       }
       <ag-grid-angular
         class="ag-theme-quartz-dark"
         [theme]="gridTheme"
-        [rowData]="telemetry.logs()"
+        [rowData]="filteredLogs()"
         [columnDefs]="columnDefs"
         [defaultColDef]="defaultColDef"
         [pagination]="true"
@@ -76,6 +79,23 @@ import { NotificationService } from '../../core/errors/error-state.service';
 export class LogsComponent implements OnInit {
   readonly telemetry = inject(TelemetryService);
   private readonly notifications = inject(NotificationService);
+  readonly searchTerm = signal('');
+  readonly filteredLogs = computed(() => {
+    const query = this.searchTerm().trim().toLocaleLowerCase();
+    const entries = this.telemetry.logs();
+    if (!query) {
+      return entries;
+    }
+    return entries.filter((entry) =>
+      Object.values(entry).some((value) =>
+        String(value ?? '').toLocaleLowerCase().includes(query),
+      ),
+    );
+  });
+
+  onSearchInput(event: Event): void {
+    this.searchTerm.set((event.target as HTMLInputElement).value);
+  }
 
   /**
    * The quiet staleness note, or null when the data is current.

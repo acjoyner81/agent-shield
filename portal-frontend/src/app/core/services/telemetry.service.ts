@@ -60,14 +60,21 @@ export interface ServiceHealthResponse {
   overall: 'healthy' | 'degraded';
 }
 
+/** Human readable roles for the gateway processes reported by the health API. */
+export function serviceDisplayName(name: string): string {
+  switch (name) {
+    case 'gateway': return 'Python LLM gateway';
+    case 'gateway-java': return 'Java edge gateway';
+    default: return name;
+  }
+}
+
 /** Dashboard poll cadence (Spec 0011 AC-5). */
 export const AUTO_REFRESH_INTERVAL_MS = 60000;
 
 @Injectable({ providedIn: 'root' })
 export class TelemetryService {
   private readonly apiUrl = '/api/v1/telemetry';
-  private refreshHandle: ReturnType<typeof setInterval> | null = null;
-
   readonly usage = signal<UsageSummary | null>(null);
   readonly health = signal<ServiceHealthResponse | null>(null);
   /**
@@ -83,6 +90,8 @@ export class TelemetryService {
 
   /** True once a fetch has succeeded at least once, so empty can mean either thing. */
   readonly logsLoaded = signal(false);
+
+  private usageRefreshHandle: ReturnType<typeof setInterval> | null = null;
 
   /** Only rows that actually carry a cost contribute; a key rotation costs nothing. */
   readonly totalSpend = computed(() =>
@@ -118,10 +127,9 @@ export class TelemetryService {
   constructor(private readonly http: HttpClient) {}
 
   /**
-   * All three are background polls. Every 60 seconds the dashboard refetches
-   * them, so a policy that interrupted would emit a notice roughly every 30
-   * seconds to a user who did nothing. A failure marks the widget stale and
-   * keeps the last known figures, with a quiet "last updated N ago" note.
+   * Background fetches are silent. Usage and health refresh every 60 seconds,
+   * while logs refresh on the observability page. Failures mark the relevant
+   * widget stale and keep the last known figures with a quiet update note.
    */
   fetchRecentLogs(): void {
     this.http.get<TelemetryLog[]>(`${this.apiUrl}/logs`, { context: SILENT_POLL }).subscribe({
@@ -135,37 +143,52 @@ export class TelemetryService {
     });
   }
 
-  fetchUsageSummary(): void {
+  fetchUsageSummary(onResult?: (success: boolean) => void): void {
     this.http.get<UsageSummary>('/api/v1/usage/summary', { context: SILENT_POLL }).subscribe({
-      next: (data) => this.usage.set(data),
-      error: () => undefined,
+      next: (data) => {
+        this.usage.set(data);
+        onResult?.(true);
+      },
+      error: () => onResult?.(false),
     });
   }
 
-  fetchServiceHealth(): void {
+  fetchServiceHealth(onResult?: (success: boolean) => void): void {
     this.http
       .get<ServiceHealthResponse>('/api/v1/health/services', { context: SILENT_POLL })
       .subscribe({
-        next: (data) => this.health.set(data),
-        error: () => undefined,
+        next: (data) => {
+          this.health.set(data);
+          onResult?.(true);
+        },
+        error: () => onResult?.(false),
       });
   }
 
-  /** Manual refresh: pull both dashboard signals now (Spec 0011 AC-5). */
-  refreshDashboard(): void {
-    this.fetchUsageSummary();
-    this.fetchServiceHealth();
+  /** Manual dashboard refresh: pull both usage and health now (Spec 0011 AC-5). */
+  refreshDashboard(onComplete?: (success: boolean) => void): void {
+    let remaining = 2;
+    let succeeded = true;
+    const completeOne = (success: boolean) => {
+      succeeded = succeeded && success;
+      remaining -= 1;
+      if (remaining === 0) {
+        onComplete?.(succeeded);
+      }
+    };
+    this.fetchUsageSummary(completeOne);
+    this.fetchServiceHealth(completeOne);
   }
 
-  startAutoRefresh(intervalMs: number = AUTO_REFRESH_INTERVAL_MS): void {
-    this.stopAutoRefresh();
-    this.refreshHandle = setInterval(() => this.refreshDashboard(), intervalMs);
+  startUsageAutoRefresh(intervalMs: number = AUTO_REFRESH_INTERVAL_MS): void {
+    this.stopUsageAutoRefresh();
+    this.usageRefreshHandle = setInterval(() => this.fetchUsageSummary(), intervalMs);
   }
 
-  stopAutoRefresh(): void {
-    if (this.refreshHandle !== null) {
-      clearInterval(this.refreshHandle);
-      this.refreshHandle = null;
+  stopUsageAutoRefresh(): void {
+    if (this.usageRefreshHandle !== null) {
+      clearInterval(this.usageRefreshHandle);
+      this.usageRefreshHandle = null;
     }
   }
 }

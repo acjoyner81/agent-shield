@@ -17,7 +17,7 @@ import { NotificationService } from '../../core/errors/error-state.service';
         <h1>API keys & access</h1>
         <p class="subhead">Control tenant credentials, role permissions, and the guardrails around every request.</p>
       </div>
-      <button class="button button-primary" type="button" (click)="openCreateModal()">+ Create API key</button>
+      <button class="button button-primary create-key-trigger" type="button" (click)="openCreateModal()">+ Create API key</button>
     </section>
 
     @if (newlyCreatedSecret()) {

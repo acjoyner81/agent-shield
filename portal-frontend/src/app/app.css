@@ -1,2 +1,21 @@
 
 :host { display: block; min-height: 100vh; }
+.notification-control { position: relative; }
+.notification-panel { position: absolute; z-index: 20; top: calc(100% + 14px); right: -12px; width: min(340px, calc(100vw - 32px)); padding: 14px; border: 1px solid #d9e1e4; border-radius: 10px; background: #fff; box-shadow: 0 12px 32px rgb(19 39 49 / 18%); color: #172a33; }
+.notification-panel__heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid #e6ecee; font-size: 13px; }
+.notification-panel__heading button { border: 0; background: transparent; color: #607681; font-size: 20px; cursor: pointer; }
+.notification-item { padding: 11px 2px; border-bottom: 1px solid #edf1f2; }
+.notification-item:last-child { border-bottom: 0; }
+.notification-item strong { font-size: 12px; }
+.notification-item p,.notification-empty { margin: 5px 0 0; color: #607681; font-size: 12px; line-height: 1.5; }
+.notification-empty { padding: 8px 2px 2px; }
+.profile-menu-wrap { position: relative; }
+.profile-menu-wrap .profile { width: 100%; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.profile-menu-wrap .profile:hover,.profile-menu-wrap .profile:focus-visible { background: #1c3945; border-radius: 6px; }
+.profile-menu-caret { margin-left: auto; color: #8da0a9; font-size: 12px; }
+.profile-menu { position: absolute; z-index: 30; left: 0; bottom: calc(100% + 8px); width: 100%; min-width: 210px; padding: 8px; border: 1px solid #29404d; border-radius: 8px; background: #132a35; box-shadow: 0 12px 28px rgb(0 0 0 / 28%); color: #edf3f4; }
+.profile-menu__identity { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-bottom: 1px solid #29404d; overflow-wrap: anywhere; }
+.profile-menu__identity strong { font-size: 12px; }
+.profile-menu__identity small,.profile-menu__identity span { color: #8da3ad; font-size: 10px; }
+.profile-menu__signout { width: 100%; margin-top: 6px; padding: 9px 10px; border: 0; border-radius: 5px; background: transparent; color: #f0c2bd; text-align: left; cursor: pointer; font-size: 11px; }
+.profile-menu__signout:hover,.profile-menu__signout:focus-visible { background: #263b44; }

@@ -5,6 +5,7 @@ export const routes: Routes = [
 	{ path: '', pathMatch: 'full', redirectTo: 'dashboard' },
 	{ path: 'dashboard', canActivate: [authGuard], loadComponent: () => import('./features/dashboard/dashboard.component').then((m) => m.DashboardComponent) },
 	{ path: 'docs', loadComponent: () => import('./features/docs/docs/docs').then((m) => m.Docs) },
+	{ path: 'assistant', canActivate: [authGuard], loadComponent: () => import('./features/assistant/assistant.component').then((m) => m.AssistantComponent) },
 	{ path: 'logs', canActivate: [authGuard], loadComponent: () => import('./features/logs/logs.component').then((m) => m.LogsComponent) },
 	{ path: 'keys', canActivate: [authGuard], loadComponent: () => import('./features/keys/keys.component').then((m) => m.KeysComponent) },
 	{ path: 'pricing', canActivate: [authGuard], loadComponent: () => import('./features/pricing/pricing.component').then((m) => m.PricingComponent) },
