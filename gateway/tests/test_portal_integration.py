@@ -60,6 +60,7 @@ PORTAL_WRITE_PATHS = [
     ("POST", "/api/v1/keys"),
     ("DELETE", "/api/v1/keys/key_machine_1"),
     ("POST", "/api/v1/keys/key_machine_1/rotate"),
+    ("PATCH", "/api/v1/keys/key_machine_1"),
     ("POST", "/api/v1/billing/checkout"),
 ]
 
@@ -91,6 +92,9 @@ def _body(path: str) -> dict:
         return {"tier": "growth"}
     if path.endswith("/rotate"):
         return {}
+    if path.startswith("/api/v1/keys/"):
+        # The portal's "Manage" control replaces a key's scope allowlist.
+        return {"permissions": []}
     if path.endswith("/keys"):
         return {"name": "Staging Gateway Key"}
     return {}

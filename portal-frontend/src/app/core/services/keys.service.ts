@@ -10,6 +10,12 @@ export interface APIKey {
   key_prefix: string;
   created_at: string;
   status: string;
+  /**
+   * The scopes the key holds. Present on every read, because the key list is
+   * also the permissions view: a key's allowlist is the only access state this
+   * gateway stores, so the page cannot honestly describe access without it.
+   */
+  permissions: string[];
   secret_key?: string;
 }
 
@@ -45,5 +51,19 @@ export class KeysService {
   /** A click, so a refusal has to be visible. */
   revokeKey(keyId: string): Observable<void> {
     return this.http.delete<void>(`${this.apiUrl}/${keyId}`, { context: USER_ACTION });
+  }
+
+  /**
+   * Replace a key's scope allowlist. A click, so a refusal has to be visible.
+   *
+   * The body is the complete set, not a diff. The gateway rejects any scope the
+   * caller does not hold itself, so a widened key can never outrank its manager.
+   */
+  updateKeyScopes(keyId: string, permissions: string[]): Observable<APIKey> {
+    return this.http.patch<APIKey>(
+      `${this.apiUrl}/${keyId}`,
+      { permissions },
+      { context: USER_ACTION },
+    );
   }
 }

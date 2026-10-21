@@ -309,3 +309,122 @@ def test_limiter_cannot_answer_429_before_authentication(fake_redis):
     # pre-auth debit would have drained.
     remaining = float(fake_redis.hget(f"rate_limit:{victim}", "tokens"))
     assert remaining == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Scoping an existing key: the write behind the portal's "Manage" control
+# ---------------------------------------------------------------------------
+
+def test_key_scope_update_replaces_the_allowlist(fake_redis):
+    """The allowlist is set, not merged, so the caller states the whole set."""
+    seed_key(fake_redis, permissions=("keys:write", "tools:execute"))
+    seed_key(
+        fake_redis,
+        secret="sk_test_target_key_000000000000",
+        key_id="key_target",
+        permissions=("tools:execute",),
+    )
+
+    with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
+        response = client.patch(
+            "/v1/keys/key_target",
+            headers=MACHINE_HEADERS,
+            json={"permissions": ["keys:write", "tools:execute"]},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["permissions"] == ["keys:write", "tools:execute"]
+    stored = json.loads(fake_redis.hget("tenant:keys:tenant_alpha", "key_target"))
+    assert stored["permissions"] == ["keys:write", "tools:execute"]
+
+
+def test_scope_update_can_empty_an_allowlist(fake_redis):
+    """An empty set is a real request: a key that authenticates but cannot act."""
+    seed_key(fake_redis, permissions=("keys:write",))
+    seed_key(
+        fake_redis,
+        secret="sk_test_target_key_000000000000",
+        key_id="key_target",
+        permissions=("tools:execute",),
+    )
+
+    with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
+        response = client.patch(
+            "/v1/keys/key_target", headers=MACHINE_HEADERS, json={"permissions": []}
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["permissions"] == []
+
+
+def test_scope_update_cannot_grant_a_scope_the_caller_lacks(fake_redis):
+    """The escalation rule that governs creation governs rescoping too.
+
+    Without it, a key holding only `keys:write` could widen a sibling it manages
+    to `billing:admin`, minting reach it never held through a key write.
+    """
+    seed_key(fake_redis, permissions=("keys:write",))
+    seed_key(
+        fake_redis,
+        secret="sk_test_target_key_000000000000",
+        key_id="key_target",
+        permissions=("tools:execute",),
+    )
+
+    with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
+        response = client.patch(
+            "/v1/keys/key_target",
+            headers=MACHINE_HEADERS,
+            json={"permissions": ["billing:admin"]},
+        )
+
+    assert response.status_code == 403
+    assert "billing:admin" in response.json()["detail"]
+    stored = json.loads(fake_redis.hget("tenant:keys:tenant_alpha", "key_target"))
+    assert stored["permissions"] == ["tools:execute"]
+
+
+def test_scope_update_without_keys_write_is_forbidden(fake_redis):
+    """Rescoping is a key write, so it needs the scope that governs key writes."""
+    seed_key(fake_redis, permissions=("tools:execute",))
+
+    with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
+        response = client.patch(
+            "/v1/keys/key_machine_1", headers=MACHINE_HEADERS, json={"permissions": []}
+        )
+
+    assert response.status_code == 403
+    assert "keys:write" in response.json()["detail"]
+
+
+def test_scope_update_on_a_revoked_key_is_a_conflict(fake_redis):
+    """A revoked key is a tombstone. Editing its scopes would revive a credential."""
+    seed_key(fake_redis, permissions=("keys:write",))
+    seed_key(
+        fake_redis,
+        secret="sk_test_target_key_000000000000",
+        key_id="key_target",
+        permissions=("tools:execute",),
+        status="Revoked",
+    )
+
+    with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
+        response = client.patch(
+            "/v1/keys/key_target", headers=MACHINE_HEADERS, json={"permissions": ["keys:write"]}
+        )
+
+    assert response.status_code == 409
+    assert "revoked" in response.json()["detail"].lower()
+    stored = json.loads(fake_redis.hget("tenant:keys:tenant_alpha", "key_target"))
+    assert stored["permissions"] == ["tools:execute"]
+
+
+def test_scope_update_of_an_unknown_key_is_not_found(fake_redis):
+    seed_key(fake_redis, permissions=("keys:write",))
+
+    with patch("gateway.rate_limit.check_token_bucket", return_value=(True, 59, 60, 1, 0)):
+        response = client.patch(
+            "/v1/keys/key_missing", headers=MACHINE_HEADERS, json={"permissions": ["keys:write"]}
+        )
+
+    assert response.status_code == 404

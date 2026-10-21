@@ -65,6 +65,39 @@ class RotateKeyRequest(BaseModel):
     )
 
 
+class APIKeyUpdateRequest(BaseModel):
+    """The complete scope list for an existing key.
+
+    There is no partial update: a scope change replaces the allowlist, so the
+    caller states the whole set rather than a diff whose result depends on what
+    the key already held.
+    """
+
+    permissions: List[str]
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "summary": "Grant a key the scopes it needs",
+                    "description": (
+                        "A principal may only grant scopes it holds itself, so no "
+                        "credential can be widened past its manager."
+                    ),
+                    "value": {"permissions": ["tools:execute"]},
+                },
+                {
+                    "summary": "Strip a key back to no scopes",
+                    "description": (
+                        "An empty list leaves a key that authenticates but cannot act."
+                    ),
+                    "value": {"permissions": []},
+                },
+            ]
+        }
+    )
+
+
 class APIKeyResponse(BaseModel):
     key_id: str
     name: str
@@ -321,6 +354,95 @@ async def rotate_api_key(
         previous_key_id=key_id,
         previous_key_rotated_at=rotated_at,
         previous_key_superseded_by=new_key_id,
+    )
+
+
+@router.patch(
+    "/{key_id}",
+    response_model=APIKeyResponse,
+    responses={
+        401: {"description": "Not authenticated."},
+        403: {
+            "description": "The caller may not grant one of the requested scopes.",
+        },
+        404: {"description": "No such API key for the authenticated tenant."},
+        409: {"description": "The key is revoked and its scopes can no longer change."},
+    },
+)
+async def update_api_key_scopes(
+    key_id: str,
+    body: APIKeyUpdateRequest,
+    request: Request,
+    tenant_id: str = Depends(resolve_active_tenant),
+    r_client: redis.Redis = Depends(get_redis_client),
+    _perm: str = Depends(require_permission("keys:write")),
+) -> APIKeyResponse:
+    """Set the scope list of an existing key.
+
+    This is the write behind the portal's "Manage" control on a key row: a
+    credential's permissions are the only access state this gateway stores, so
+    rescoping is how access is actually managed. It is a key write, so it needs
+    `keys:write`, and the escalation rule that governs creation governs this
+    too: a principal may only grant scopes it holds, or a key manager could mint
+    itself privileges it never held by editing a key it did control.
+
+    The read-check-write runs under WATCH on the tenant key hash so a concurrent
+    rotation cannot be overwritten by a stale copy of its metadata.
+    """
+    granted = getattr(request.state, "permissions", None) or set()
+    escalated = sorted(set(body.permissions) - granted)
+    if escalated:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Cannot grant scopes you do not hold: {', '.join(escalated)}",
+        )
+
+    hash_key = _hash_key(tenant_id)
+    with r_client.pipeline() as pipe:
+        while True:
+            try:
+                pipe.watch(hash_key)
+                # Read through the watched connection: the read and the write
+                # must see the same hash, or the guard below watches a hash that
+                # was not the one the metadata came from.
+                raw = pipe.hget(hash_key, key_id)
+                meta = _read_meta_from_raw(raw) if raw else None
+                if meta is None:
+                    raise HTTPException(status_code=404, detail="API key not found")
+                if meta.get("status") == "Revoked":
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Cannot change the scopes of a revoked API key",
+                    )
+
+                meta["permissions"] = list(body.permissions)
+
+                pipe.multi()
+                pipe.hset(hash_key, key_id, json.dumps(meta))
+                pipe.execute()
+                break
+            except redis.WatchError:
+                continue
+
+    emit_key_rotation(
+        tenant_id=tenant_id,
+        key_id=key_id,
+        action="scopes_updated",
+        status=meta.get("status", "Active"),
+        version=int(meta.get("version", 1)),
+        permissions=list(body.permissions),
+    )
+
+    return APIKeyResponse(
+        key_id=key_id,
+        name=meta.get("name", "API Key"),
+        key_prefix=meta.get("prefix", "sk_live_••••••••••••"),
+        created_at=meta.get("created_at", ""),
+        status=meta.get("status", "Active"),
+        version=int(meta.get("version", 1)),
+        rotated_at=meta.get("rotated_at"),
+        superseded_by=meta.get("superseded_by"),
+        permissions=list(body.permissions),
     )
 
 

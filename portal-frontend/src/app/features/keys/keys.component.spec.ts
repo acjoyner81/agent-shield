@@ -1,9 +1,11 @@
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
+import { signal } from '@angular/core';
 
 import { KeysComponent } from './keys.component';
+import { AuthService } from '../../core/services/auth.service';
 import { NotificationService } from '../../core/errors/error-state.service';
 
 /**
@@ -20,6 +22,20 @@ import { NotificationService } from '../../core/errors/error-state.service';
  * `main.py` calls the helpers, and it should be a deliberate change to this file
  * rather than a quiet edit to the template.
  */
+/**
+ * The keys page reads `permissions` from the signed-in principal's token to
+ * bound what a key may be granted. The Auth0 SDK needs a configured tenant, so
+ * only that surface is stubbed; the rest of the page is real.
+ */
+function authStub(permissions: string[] = ['tools:execute', 'keys:write']) {
+  return {
+    user: signal({ name: 'Test Operator' }),
+    userName: signal('Test Operator'),
+    tenantName: signal('AgentShield Enterprise'),
+    authenticated: signal(true),
+    permissions: signal(permissions),
+  };
+}
 describe('KeysComponent protection status claims', () => {
   let httpMock: HttpTestingController;
   let element: HTMLElement;
@@ -27,7 +43,14 @@ describe('KeysComponent protection status claims', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [KeysComponent],
-      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        // The keys page reads the signed-in principal's scopes; the real
+        // Auth0Service needs a configured tenant, so stub just that surface.
+        { provide: AuthService, useValue: authStub() },
+      ],
     });
     httpMock = TestBed.inject(HttpTestingController);
 
@@ -89,7 +112,14 @@ describe('KeysComponent key list staleness', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [KeysComponent],
-      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        // The keys page reads the signed-in principal's scopes; the real
+        // Auth0Service needs a configured tenant, so stub just that surface.
+        { provide: AuthService, useValue: authStub() },
+      ],
     });
     httpMock = TestBed.inject(HttpTestingController);
     notifications = TestBed.inject(NotificationService);
@@ -127,3 +157,98 @@ describe('KeysComponent key list staleness', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('.stale-note')).toBeNull();
   });
 });
+
+/**
+ * The page must describe real access, not invented people.
+ *
+ * "Workspace roles / RBAC policy" listed Anthony Joyner, Maria Ortiz, and Sam
+ * Chen with three invented roles, each beside a "Manage" button with no handler.
+ * None of it existed: this gateway stores no members, no roles, and no team
+ * directory, and it never has. Two things were wrong at once: fabricated data
+ * sold as a workspace roster, and a control styled as interactive that did
+ * nothing when pressed (docs/portal-ui-design.md).
+ *
+ * The honest version is the access state the gateway actually holds - the signed
+ * in principal's own token scopes, and a per key scope allowlist - so these
+ * assertions are the tripwire. Reinstating a member list is correct only once a
+ * members API exists, and that is a deliberate change to this file.
+ */
+describe('KeysComponent access honesty', () => {
+  let httpMock: HttpTestingController;
+  let fixture: ComponentFixture<KeysComponent>;
+  let element: HTMLElement;
+
+  const KEYS = [
+    {
+      key_id: 'key_abc',
+      name: 'Production',
+      key_prefix: 'ask_live',
+      created_at: '2026-09-01',
+      status: 'Active',
+      permissions: ['tools:execute'],
+    },
+  ];
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [KeysComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        // The keys page reads the signed-in principal's scopes; the real
+        // Auth0Service needs a configured tenant, so stub just that surface.
+        { provide: AuthService, useValue: authStub() },
+      ],
+    });
+    httpMock = TestBed.inject(HttpTestingController);
+
+    fixture = TestBed.createComponent(KeysComponent);
+    fixture.detectChanges();
+    element = fixture.nativeElement as HTMLElement;
+
+    httpMock.expectOne('/api/v1/keys').flush(KEYS);
+    fixture.detectChanges();
+  });
+
+  afterEach(() => httpMock.verify());
+
+  it('does not present a fabricated workspace roster', () => {
+    // No member directory endpoint exists, so no member can be truthfully listed.
+    for (const name of ['Anthony Joyner', 'Maria Ortiz', 'Sam Chen']) {
+      expect(element.textContent).not.toContain(name);
+    }
+    expect(element.textContent).not.toContain('RBAC policy');
+    expect(element.textContent).not.toContain('Workspace roles');
+  });
+
+  it('does not render an interactive control that performs no action', () => {
+    // Every button on the page must be inside a form or wired to a handler; the
+    // fabricated rows that held the dead "Manage" buttons are gone entirely.
+    const buttons = [...element.querySelectorAll('button')];
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(button.getAttribute('type')).toBe('button');
+    }
+    expect(element.querySelector('.role-row')).toBeNull();
+  });
+
+  it("shows each key's real scopes", () => {
+    expect(element.textContent).toContain('Scopes: tools:execute');
+  });
+
+  it('opens a scope editor rather than doing nothing when Manage is pressed', () => {
+    const manage = [...element.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'Manage',
+    );
+    expect(manage).toBeDefined();
+
+    manage!.click();
+    fixture.detectChanges();
+
+    const dialog = element.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.textContent).toContain('Manage access');
+  });
+});
+

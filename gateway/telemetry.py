@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger("agentshield.telemetry")
@@ -84,6 +84,10 @@ class KeyRotationData(BaseModel):
     version: Optional[int] = None
     rotated_at: Optional[str] = None
     superseded_by: Optional[str] = None
+    # The scope set the key holds after the event. A scope change is a key
+    # write, and an audit trail that records that a key was rescoped without
+    # recording the scopes leaves the interesting question unanswered.
+    permissions: Optional[List[str]] = None
 
 
 class EventEnvelope(BaseModel):
@@ -381,6 +385,7 @@ def emit_key_rotation(
     version: Optional[int] = None,
     rotated_at: Optional[str] = None,
     superseded_by: Optional[str] = None,
+    permissions: Optional[List[str]] = None,
     user_id: Optional[str] = None,
     trace_id: Optional[str] = None,
     span_id: Optional[str] = None,
@@ -393,6 +398,7 @@ def emit_key_rotation(
         version=version,
         rotated_at=rotated_at,
         superseded_by=superseded_by,
+        permissions=permissions,
     ).model_dump()
     return emit_event(
         tenant_id=tenant_id,
