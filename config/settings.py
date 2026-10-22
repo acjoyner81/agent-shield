@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     stripe_product_pro: str = "prod_VHXYKG4I5wq1n6"
     stripe_product_enterprise: str = "prod_VHYSzpIzdb1CsJ"
 
+    # Stripe Price Mapping. Stripe checkout takes a price (`price_...`), never a
+    # product (`prod_...`), so the product ids above cannot be used for the line
+    # item. These stay empty until the operator pins the real prices; an empty
+    # value disables checkout with a clear message instead of a Stripe rejection.
+    stripe_price_starter: str = ""
+    stripe_price_pro: str = ""
+    stripe_price_enterprise: str = ""
+
     # Tier Rate Limits (RPM)
     default_free_rpm: int = 60
     starter_rpm: int = 20

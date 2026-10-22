@@ -3,7 +3,7 @@ _Steps derived from spec 0007 acceptance criteria. `/check verify` runs these; `
 
 ## UI / manual
 - [x] POST /v1/billing/checkout {price_id} → returns checkout.stripe.com URL → AC-3
-- [x] POST /v1/billing/checkout (no price_id) → 400 "price_id is required" → AC-3
+- [x] POST /v1/billing/checkout (no price_id) → 503 "Billing is not configured" (was 400 "price_id is required" before 2026-10-22; a price id is `price_...`, and a product id is refused with a misconfiguration 503) → AC-3
 - [x] POST /v1/billing/portal (no customer) → 404 "No Stripe customer" → AC-4
 - [x] POST /v1/billing/portal (existing customer) → returns portal_url → AC-4
 - [x] POST /v1/billing/webhook (forged signature) → 400 "Invalid signature" → AC-5

@@ -101,10 +101,10 @@ def test_checkout_creates_session(mock_customer, mock_session_create):
 
 
 def test_checkout_missing_price_id():
-    """AC-3: a checkout with no price is a 400, not a Stripe call."""
+    """AC-3: a checkout with no price is a 503, not a Stripe call."""
     response = client.post("/v1/billing/checkout", params={}, headers=CLIENT_HEADERS)
-    assert response.status_code == 400
-    assert response.json()["detail"] == "price_id is required"
+    assert response.status_code == 503
+    assert "Billing is not configured" in response.json()["detail"]
 
 
 @patch("gateway.billing.stripe.billing_portal.Session.create")
@@ -253,7 +253,7 @@ class TestCheckoutEdgeCases:
             mock_session.side_effect = stripe.error.StripeError("API Error", "user_message")
             response = client.post(
                 "/v1/billing/checkout",
-                params={"price_id": "bad_price"},
+                params={"price_id": "price_bad"},
                 headers=CLIENT_HEADERS,
             )
         assert response.status_code == 400
@@ -265,8 +265,18 @@ class TestCheckoutEdgeCases:
             params={"price_id": ""},
             headers=CLIENT_HEADERS,
         )
-        assert response.status_code == 400
-        assert response.json()["detail"] == "price_id is required"
+        assert response.status_code == 503
+        assert "Billing is not configured" in response.json()["detail"]
+
+    def test_checkout_rejects_a_product_id(self):
+        """A product id (prod_...) is refused before Stripe, not surfaced as an outage."""
+        response = client.post(
+            "/v1/billing/checkout",
+            params={"price_id": "prod_VHXYKG4I5wq1n6"},
+            headers=CLIENT_HEADERS,
+        )
+        assert response.status_code == 503
+        assert "misconfigured" in response.json()["detail"]
 
 
 class TestWebhookSecurityCases:

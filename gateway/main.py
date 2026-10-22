@@ -115,6 +115,7 @@ app.include_router(help_assistant_router)
 app.include_router(billing_router, prefix="/api")
 app.include_router(metering_router, prefix="/api")
 app.include_router(keys_router, prefix="/api")
+app.include_router(help_assistant_router, prefix="/api")
 r = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 API_KEY_NAME = "X-Tenant-API-Key"

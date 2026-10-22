@@ -62,6 +62,7 @@ PORTAL_WRITE_PATHS = [
     ("POST", "/api/v1/keys/key_machine_1/rotate"),
     ("PATCH", "/api/v1/keys/key_machine_1"),
     ("POST", "/api/v1/billing/checkout"),
+    ("POST", "/api/v1/help/assistant"),
 ]
 
 
@@ -90,6 +91,8 @@ def _body(path: str) -> dict:
         return {"period": "today"}
     if path.endswith("/billing/checkout"):
         return {"tier": "growth"}
+    if path.endswith("/help/assistant"):
+        return {"question": "How do I create an API key?"}
     if path.endswith("/rotate"):
         return {}
     if path.startswith("/api/v1/keys/"):
@@ -123,6 +126,72 @@ class TestPortalRoutesAreReachable:
         response = client.request(method, path, headers=BEARER, json=_body(path))
         assert response.status_code != 404, f"{method} {path} is not mounted; the portal would break"
         assert response.status_code != 401, f"{method} {path} rejected an authenticated caller"
+
+
+class TestPortalAssistantAlias:
+    """The assistant route is reached at `/api/v1/help/assistant`, and only there.
+
+    The gap that shipped a broken assistant: `help_assistant` was mounted bare
+    only, so `/api/v1/help/assistant` 404ed on every live portal call while
+    `/v1/help/assistant` answered. The endpoint tests call the bare path, so they
+    never saw it. This pins the alias the portal's assistant service uses.
+    """
+
+    CORPUS = {
+        "version": 1,
+        "documents": [],
+        "sections": [
+            {"source_id": "section:api-keys", "section_id": "api-keys", "document_id": "gs",
+             "title": "Get started", "heading": "API keys", "summary": "Create keys.",
+             "body": "Create an API key with POST /v1/keys.", "blocks": []},
+        ],
+        "suggestions": [],
+        "abstention_section_id": "troubleshooting",
+        "operation_sections": {},
+    }
+
+    @pytest.fixture(autouse=True)
+    def _assistant_corpus(self, tmp_path, monkeypatch):
+        """Point the endpoint at a synthetic corpus and withhold the provider.
+
+        With no provider credential the handler answers 503, which is enough to
+        tell a mounted route from a missing one without reaching Baseten.
+        """
+        import gateway.routers.help_assistant as ha
+
+        corpus_file = tmp_path / "help_center_content.json"
+        corpus_file.write_text(json.dumps(self.CORPUS), encoding="utf-8")
+        monkeypatch.setattr(ha, "CORPUS_PATH", corpus_file)
+        monkeypatch.setattr(ha.settings, "baseten_api_key", "")
+
+    def test_portal_assistant_path_is_mounted(self, fake_redis, allowed_request):
+        """A covered question must reach the handler, not a 404."""
+        response = client.post(
+            "/api/v1/help/assistant", headers=BEARER, json={"question": "How do I create an API key?"}
+        )
+
+        # 503 (provider withheld) means the route ran; 404 would mean it never mounted.
+        assert response.status_code != 404, "the assistant is not mounted at /api; the portal would break"
+        assert response.status_code != 401, "the assistant alias rejected an authenticated caller"
+
+    def test_alias_and_contract_path_agree(self, fake_redis, allowed_request):
+        """The two mounts must behave identically, or the portal is a different door."""
+        contract = client.post(
+            "/v1/help/assistant", headers=BEARER, json={"question": "How do I create an API key?"}
+        )
+        alias = client.post(
+            "/api/v1/help/assistant", headers=BEARER, json={"question": "How do I create an API key?"}
+        )
+
+        assert contract.status_code == alias.status_code
+        assert contract.status_code != 404
+
+    def test_alias_requires_a_user_token(self, fake_redis, allowed_request):
+        """The alias is user bearer auth, not the machine key the contract routes accept."""
+        response = client.post(
+            "/api/v1/help/assistant", headers=MACHINE_HEADERS, json={"question": "How do I create an API key?"}
+        )
+        assert response.status_code == 401
 
 
 class TestPortalAliasIsNotASecurityHole:

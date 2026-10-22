@@ -73,6 +73,31 @@ def test_env_override_product_ids():
     assert s.stripe_product_enterprise == "prod_new_enterprise"
 
 
+def test_stripe_price_defaults_are_empty():
+    """Checkout needs a price; unset means billing is disabled, not misconfigured."""
+    with patch.dict(os.environ, {
+        "STRIPE_PRICE_STARTER": "",
+        "STRIPE_PRICE_PRO": "",
+        "STRIPE_PRICE_ENTERPRISE": "",
+    }, clear=False):
+        s = Settings()
+    assert s.stripe_price_starter == ""
+    assert s.stripe_price_pro == ""
+    assert s.stripe_price_enterprise == ""
+
+
+def test_env_override_price_ids():
+    with patch.dict(os.environ, {
+        "STRIPE_PRICE_STARTER": "price_starter",
+        "STRIPE_PRICE_PRO": "price_pro",
+        "STRIPE_PRICE_ENTERPRISE": "price_enterprise",
+    }):
+        s = Settings()
+    assert s.stripe_price_starter == "price_starter"
+    assert s.stripe_price_pro == "price_pro"
+    assert s.stripe_price_enterprise == "price_enterprise"
+
+
 def test_settings_singleton():
     assert settings is not None
     assert isinstance(settings, Settings)

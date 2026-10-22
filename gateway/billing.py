@@ -64,9 +64,9 @@ class CheckoutRequest(BaseModel):
     tier: Optional[str] = None
 
 TIER_TO_PRICE_MAP = {
-    "starter": settings.stripe_product_starter,
-    "pro": settings.stripe_product_pro,
-    "enterprise": settings.stripe_product_enterprise,
+    "starter": settings.stripe_price_starter,
+    "pro": settings.stripe_price_pro,
+    "enterprise": settings.stripe_price_enterprise,
 }
 
 @router.post("/checkout")
@@ -89,7 +89,19 @@ async def create_checkout_session(
             pass
 
     if not target_price:
-        raise HTTPException(status_code=400, detail="price_id is required")
+        raise HTTPException(
+            status_code=503,
+            detail="Billing is not configured. Set STRIPE_PRICE_<TIER> to an active Stripe price id.",
+        )
+
+    # Guard against a product id slipping in here: Stripe checkout needs a price
+    # (`price_...`), and a `prod_...` value produces an opaque "No such price"
+    # rejection that reads like an outage rather than a misconfiguration.
+    if not target_price.startswith("price_"):
+        raise HTTPException(
+            status_code=503,
+            detail="Billing is misconfigured. A Stripe price id (price_...) is required, not a product id.",
+        )
 
     try:
         customer_id = ensure_stripe_customer(tenant_id)
