@@ -1,7 +1,7 @@
 import { Component, OnDestroy, inject, signal } from '@angular/core';
 import { NavigationStart, Router, RouterLink } from '@angular/router';
 import { Subscription, filter } from 'rxjs';
-import { AssistantMessage, AssistantService, retryDelaySeconds } from './assistant.service';
+import { AssistantMessage, AssistantService, describeAssistantFailure, retryDelaySeconds } from './assistant.service';
 import { HelpContentService, HelpCorpus } from '../../core/services/help-content.service';
 
 @Component({
@@ -54,9 +54,7 @@ export class AssistantComponent implements OnDestroy {
       error: (failure: unknown) => {
         if (requestId !== this.generation) return;
         this.loading.set(false);
-        this.error.set(failure instanceof Error && 'status' in failure && failure.status === 429
-          ? 'The assistant is rate limited. Your question is saved; retry when the wait ends.'
-          : 'The assistant could not answer right now. Your question is saved; you can retry.');
+        this.error.set(describeAssistantFailure(failure));
         const wait = retryDelaySeconds(failure);
         if (wait) this.startRetryTimer(wait);
       },
