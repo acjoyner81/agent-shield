@@ -18,6 +18,7 @@
     "list_api_keys_v1_keys_get": "api-keys",
     "create_api_key_v1_keys_post": "api-keys",
     "rotate_api_key_v1_keys__key_id__rotate_post": "api-keys",
+    "update_api_key_scopes_v1_keys__key_id__patch": "api-keys",
     "revoke_api_key_v1_keys__key_id__delete": "api-keys",
     "execute_tool_v1_tools_execute_post": "first-request",
     "process_llm_request_v1_chat_completions_post": "first-request"

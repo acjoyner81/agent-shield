@@ -275,8 +275,8 @@ Give signed in tenant users a cited assistant for using the portal and API, grou
   - [x] Generate the public Help Center and retrieval corpus from the shared Markdown manifest, with stable IDs and API operation mappings (AC-2, AC-3, AC-4)
   - [x] Build the authenticated assistant endpoint with bounded history, gateway guardrails, configured Meta inference, citations, and safe failure behavior (AC-3, AC-5, AC-6, AC-7, AC-9)
   - [x] Record content safe request telemetry and available token usage, keeping missing counts and unpriced cost unavailable (AC-8)
-  - [x] Build the signed in Assistant page with navigation, suggestions, cited thread, loading, retry, clear, and responsive behavior (AC-1, AC-4, AC-5)
-- [ ] Verify it: `/check verify documentation assistant`
+   - [x] Build the signed in Assistant page with navigation, suggestions, cited thread, loading, retry, clear, and responsive behavior (AC-1, AC-4, AC-5)
+- [x] Verify it: `/check verify documentation assistant` — run 2026-10-22, verdict **PASS** against the committed HEAD implementation. Endpoint proven live: a covered question returns paragraphs with validated `/docs#<section>` citations and a nullable usage record, an unsupported question abstains and links `/docs#troubleshooting`, injection in the question or history returns 400 before any provider call, a machine key returns 401, invalid shapes and history return 422, and no prompt text appears in logs or telemetry. `/docs` renders publicly with the assistant link, `/assistant` is guarded. One cross spec finding: the spec 0010 `PATCH /v1/keys/{key_id}` route left the Help Center manifest's operation map stale, which failed the corpus build; the manifest now maps it. Details and the run note in `docs/specs/0017-docs-assistant/verify.md`.
 - [ ] Test it: `/test documentation assistant`
 
 ### 19. Java Gateway Core Logic · done · Slice 5
