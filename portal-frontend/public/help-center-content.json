@@ -6,60 +6,169 @@
       "title": "Get started with AgentShield",
       "sections": [
         {
+          "source_id": "section:overview",
           "section_id": "overview",
+          "document_id": "getting-started",
+          "title": "Get started with AgentShield",
           "heading": "Get started with AgentShield",
-          "body": [
-            "",
-            "AgentShield gives tenant administrators and developers one place to manage API access, route model requests, and review usage and service health.",
-            ""
+          "summary": "",
+          "body": "AgentShield gives tenant administrators and developers one place to manage API access, route model requests, and review usage and service health.",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "AgentShield gives tenant administrators and developers one place to manage API access, route model requests, and review usage and service health.",
+              "parts": [
+                {
+                  "text": "AgentShield gives tenant administrators and developers one place to manage API access, route model requests, and review usage and service health."
+                }
+              ]
+            }
           ]
         },
         {
+          "source_id": "section:api-keys",
           "section_id": "api-keys",
+          "document_id": "getting-started",
+          "title": "Get started with AgentShield",
           "heading": "API keys",
-          "body": [
-            "",
-            "Create a tenant key from [API keys & access](/keys). Give it a recognizable name, copy the secret when it is shown, and store it in a secret manager. The portal does not show the full secret again. Revoke keys that are no longer needed. Key creation and rotation are restricted to permissions held by the signed-in principal.",
-            ""
+          "summary": "",
+          "body": "Create a tenant key from [API keys & access](/keys). Give it a recognizable name, copy the secret when it is shown, and store it in a secret manager. The portal does not show the full secret again. Revoke keys that are no longer needed. Key creation and rotation are restricted to permissions held by the signed-in principal.",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Create a tenant key from [API keys & access](/keys). Give it a recognizable name, copy the secret when it is shown, and store it in a secret manager. The portal does not show the full secret again. Revoke keys that are no longer needed. Key creation and rotation are restricted to permissions held by the signed-in principal.",
+              "parts": [
+                {
+                  "text": "Create a tenant key from "
+                },
+                {
+                  "text": "API keys & access",
+                  "url": "/keys"
+                },
+                {
+                  "text": ". Give it a recognizable name, copy the secret when it is shown, and store it in a secret manager. The portal does not show the full secret again. Revoke keys that are no longer needed. Key creation and rotation are restricted to permissions held by the signed-in principal."
+                }
+              ]
+            }
           ]
         },
         {
+          "source_id": "section:first-request",
           "section_id": "first-request",
+          "document_id": "getting-started",
+          "title": "Get started with AgentShield",
           "heading": "Make your first request",
-          "body": [
-            "",
-            "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).",
-            "",
-            "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:",
-            "",
-            "```bash",
-            "curl -X POST http://localhost:8000/v1/meta/chat/completions \\",
-            "  -H 'Content-Type: application/json' \\",
-            "  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\",
-            "  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'",
-            "```",
-            "",
-            "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
-            ""
+          "summary": "",
+          "body": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).\n\nFor the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:\n\n```bash\ncurl -X POST http://localhost:8000/v1/meta/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'\n```\n\nThe gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).",
+              "parts": [
+                {
+                  "text": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in "
+                },
+                {
+                  "text": "Models & routing",
+                  "url": "/models"
+                },
+                {
+                  "text": "."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "text": "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:",
+              "parts": [
+                {
+                  "text": "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:"
+                }
+              ]
+            },
+            {
+              "type": "code",
+              "text": "curl -X POST http://localhost:8000/v1/meta/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'"
+            },
+            {
+              "type": "paragraph",
+              "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
+              "parts": [
+                {
+                  "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client."
+                }
+              ]
+            }
           ]
         },
         {
+          "source_id": "section:usage-health",
           "section_id": "usage-health",
+          "document_id": "getting-started",
+          "title": "Get started with AgentShield",
           "heading": "Usage and service health",
-          "body": [
-            "",
-            "Open [Overview](/dashboard) for tenant usage and the current service health summary. Open [Observability](/logs) to review recent gateway events. A degraded or stale health result means the latest probe needs attention; check the service detail before treating it as recovered.",
-            ""
+          "summary": "",
+          "body": "Open [Overview](/dashboard) for tenant usage and the current service health summary. Open [Observability](/logs) to review recent gateway events. A degraded or stale health result means the latest probe needs attention; check the service detail before treating it as recovered.",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Open [Overview](/dashboard) for tenant usage and the current service health summary. Open [Observability](/logs) to review recent gateway events. A degraded or stale health result means the latest probe needs attention; check the service detail before treating it as recovered.",
+              "parts": [
+                {
+                  "text": "Open "
+                },
+                {
+                  "text": "Overview",
+                  "url": "/dashboard"
+                },
+                {
+                  "text": " for tenant usage and the current service health summary. Open "
+                },
+                {
+                  "text": "Observability",
+                  "url": "/logs"
+                },
+                {
+                  "text": " to review recent gateway events. A degraded or stale health result means the latest probe needs attention; check the service detail before treating it as recovered."
+                }
+              ]
+            }
           ]
         },
         {
+          "source_id": "section:troubleshooting",
           "section_id": "troubleshooting",
+          "document_id": "getting-started",
+          "title": "Get started with AgentShield",
           "heading": "Troubleshooting",
-          "body": [
-            "",
-            "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.",
-            "",
-            "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment."
+          "summary": "",
+          "body": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.\n\nFor API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment.",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.",
+              "parts": [
+                {
+                  "text": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the "
+                },
+                {
+                  "text": "Observability",
+                  "url": "/logs"
+                },
+                {
+                  "text": " page."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "text": "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment.",
+              "parts": [
+                {
+                  "text": "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment."
+                }
+              ]
+            }
           ]
         }
       ]

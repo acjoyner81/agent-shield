@@ -75,9 +75,8 @@ def main():
     ids = set()
     known_routes = {"/docs", "/dashboard", "/logs", "/keys", "/models", "/assistant"}
     for doc in MANIFEST["documents"]:
-        content = parse_document(doc)
-        documents.append({"document_id": doc["document_id"], "title": doc["title"], "sections": content})
-        for section in content:
+        content = []
+        for section in parse_document(doc):
             sid = section["section_id"]
             if sid in ids:
                 raise SystemExit(f"Duplicate Help Center section ID: {sid}")
@@ -86,12 +85,19 @@ def main():
             for target in LINK_RE.findall(text):
                 if not target.startswith("/") or target.startswith("//") or target.split("#", 1)[0] not in known_routes:
                     raise SystemExit(f"Unsupported Help Center link: {target}")
-            sections.append({
+            # One shape per section: the portal reads `documents[].sections` and
+            # renders `blocks`, while retrieval reads the flat list by `body`.
+            # Building the object once keeps the two from drifting, which is how
+            # the portal shipped headings whose sections rendered empty.
+            built = {
                 "source_id": f"section:{sid}", "section_id": sid,
                 "document_id": doc["document_id"], "title": doc["title"],
                 "heading": section["heading"], "summary": "", "body": text,
                 "blocks": blocks_for(section),
-            })
+            }
+            content.append(built)
+            sections.append(built)
+        documents.append({"document_id": doc["document_id"], "title": doc["title"], "sections": content})
     for suggestion in MANIFEST["suggestions"]:
         if suggestion["section_id"] not in ids:
             raise SystemExit(f"Unknown suggestion section: {suggestion['section_id']}")

@@ -14,7 +14,9 @@ const SECTIONS = [
     title: 'Get started with AgentShield',
     heading: 'API keys',
     body: 'Create an API key.',
-    blocks: [{ type: 'paragraph' as const, text: 'Create an API key.' }],
+    blocks: [
+      { type: 'paragraph' as const, text: 'Create an API key.', parts: [{ text: 'Create an API key.' }] },
+    ],
   },
   {
     source_id: 'section:troubleshooting',
@@ -23,7 +25,9 @@ const SECTIONS = [
     title: 'Get started with AgentShield',
     heading: 'Troubleshooting',
     body: 'When something fails.',
-    blocks: [{ type: 'paragraph' as const, text: 'When something fails.' }],
+    blocks: [
+      { type: 'paragraph' as const, text: 'When something fails.', parts: [{ text: 'When something fails.' }] },
+    ],
   },
 ];
 
@@ -76,5 +80,17 @@ describe('Help center', () => {
       expect(href.startsWith('#')).toBe(true);
       expect(el.querySelector(href)).toBeTruthy();
     }
+  });
+
+  it('renders each section\'s blocks, not just its heading', () => {
+    // The gap that shipped empty sections: the nav and anchors resolved, but
+    // `documents[].sections[].blocks` was never serialized, so every section
+    // rendered a heading with no body. A test that only checks links passes on
+    // that. This asserts the paragraph text actually reaches the DOM.
+    const el = render().nativeElement as HTMLElement;
+    const sections = Array.from(el.querySelectorAll('.docs-section'));
+    expect(sections.length).toBe(2);
+    expect(sections[0].querySelector('p')?.textContent).toContain('Create an API key.');
+    expect(sections[1].querySelector('p')?.textContent).toContain('When something fails.');
   });
 });
