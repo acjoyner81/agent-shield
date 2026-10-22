@@ -220,10 +220,11 @@ Give machine access a real credential lifecycle: hashed storage, rotation with a
    - [x] `verify_api_key` dependency wired into tools/chat routes
    - [x] Machine principals enforced by `require_permission`
    - [x] Key rotation telemetry event
-- [x] Verify it: `/check verify api key rotation`
+   - [x] Rescope endpoint (`PATCH /v1/keys/{key_id}`) with the no escalation rule, plus the portal scope editor
+- [x] Verify it: `/check verify api key rotation` — run 2026-10-21, verdict **PASS**. All ten ACs exercised against the live stack: create/digest-only storage and key auth on `/v1/tools/execute`, rotate with a working successor, grace use, grace expiry (401), revoke tombstone (immediate 401), RBAC 403/200, unknown 401 with a spoofed `X-Tenant-ID` ignored, rescope taking effect on a gated route, the escalation refusal (a `keys:write` key cannot grant `billing:admin`), and the refusal set (unknown 404, missing `keys:write` 403, revoked 409) with a `scopes_updated` event carrying the new scope set. Evidence in `docs/specs/0010-api-key-rotation/verify.md`.
 - [x] Test it: `/test api key rotation`
 - [x] Review it: `/check review api key rotation`
-- [ ] Document it: `/document api key rotation`
+- [x] Document it: `/document api key rotation` — changelog entry added 2026-10-21 (added: API key scope editing via `PATCH /v1/keys/{key_id}`; fixed: the fabricated portal roles card).
 Spec 0010 · `docs/specs/0010-api-key-rotation/index.md` · code in `gateway/keys.py`, `gateway/auth.py`
 
 ### 12. UI Error Handling · done

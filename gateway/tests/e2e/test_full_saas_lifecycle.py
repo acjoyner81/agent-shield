@@ -262,7 +262,7 @@ def test_04_minted_key_is_usable_for_tool_execution(live_tenant):
                 "X-Tenant-API-Key": live_tenant["secret"],
                 "Content-Type": "application/json",
             },
-            json={"tool_name": "echo", "arguments": {"message": "e2e lifecycle probe"}},
+            json={"tool_name": "echoTool", "params": {"message": "e2e lifecycle probe"}},
         )
 
     assert response.status_code == 200, response.text

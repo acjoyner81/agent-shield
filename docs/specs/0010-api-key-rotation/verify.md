@@ -1,4 +1,4 @@
-# Verify: API Key Rotation · spec 0010 · updated 2026-09-23
+# Verify: API Key Rotation · spec 0010 · updated 2026-10-21
 _Steps derived from spec 0010 acceptance criteria. `/check verify` runs these; `/test` locks the durable ones._
 
 ## Commands
@@ -14,7 +14,10 @@ Run with a live gateway (redis + Python gateway up) and `DEV_MODE=true` (bearer 
 - [x] `curl -X DELETE localhost:8000/v1/keys/<key_id> -H "Authorization: Bearer dev-mock-token"` → 204; present the secret → 401; `redis-cli HGET tenant:keys:tenant_alpha <key_id>` still returns status `Revoked`; `GET /v1/keys` lists the tombstone → AC-6
 - [x] Create key with `"permissions":["logs:read"]`, present it on `/v1/tools/execute` → 403; recreate with `["tools:execute"]` → 200 → AC-7
 - [x] Present a garbage secret → 401 "Unknown API key"; present a valid secret plus `X-Tenant-ID: tenant_evil` → request still binds `tenant_alpha` (authz/telemetry tenant id) → AC-8
-- [x] Rotating a key twice → second rotate returns 409; rotating a revoked key → 409 (build guard) → API surface
+- [ ] Rotating a key twice → second rotate returns 409; rotating a revoked key → 409 (build guard) → API surface
+- [x] `curl -X PATCH localhost:8000/v1/keys/<key_id> -H "Authorization: Bearer dev-mock-token" -d '{"permissions":["tools:execute","logs:read"]}'` → 200 with the new `permissions`; present that key on `/v1/tools/execute` → 200 → AC-9
+- [x] Impersonate a lesser manager: mint a key holding only `keys:write` and present its secret on `PATCH /v1/keys/<other>`, granting `billing:admin` → 403 naming `billing:admin`; `redis-cli HGET tenant:keys:<tenant> <key_id>` shows the allowlist unchanged → AC-9
+- [x] `PATCH` an unknown key_id → 404; `PATCH` a `Revoked` key → 409 with the stored allowlist untouched; `PATCH` without `keys:write` → 403; a successful `PATCH` lands an `agentshield.security.key_rotation` event with `data.action=="scopes_updated"` and `data.permissions` equal to the written set → AC-10
 
 ## Acceptance-criteria coverage
 
@@ -26,3 +29,5 @@ Run with a live gateway (redis + Python gateway up) and `DEV_MODE=true` (bearer 
 - AC-6: revoke → immediate 401 + `Revoked` tombstone (command 7)
 - AC-7: permission allowlist enforced on RBAC route (command 8)
 - AC-8: unknown → 401; spoofed tenant header never wins (command 9)
+- AC-9: `PATCH` replaces the allowlist and takes effect on a gated route; a caller cannot grant a scope it lacks (commands 11, 12)
+- AC-10: revoked 409 with allowlist frozen, unknown 404, and the `scopes_updated` event carries the new scope set (command 13)

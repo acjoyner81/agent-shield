@@ -48,12 +48,27 @@ Rotation and revocation both take effect instantly; no grace window exists.
 - Rotating a credential breaks every live client the moment it happens, the exact downtime this feature exists to remove.
 - Confirmed against scope: the gateway operator explicitly wants a transition window.
 
+### Option 4: Scopes fixed at creation (revoke and recreate to change them)
+
+A key's allowlist is set once when the key is created. Changing access means creating a new key and revoking the old one.
+
+**Pros**:
+- The smallest possible surface: one write that sets scopes, no update path to secure.
+- No window where a key's reach changes under a caller that already holds the secret.
+
+**Cons**:
+- Narrowing a key's access becomes an outage: every client holding the old secret must redeploy with a new one, which is the same downtime this spec exists to remove for rotation.
+- The portal has no real "manage" action to offer, so the natural UI is a decorative control, which is what the page shipped before this was added.
+- Auditing a key's access history is harder, because the change is a delete plus a create rather than one attributed scope change.
+
 ## Decision
 
 **Chosen option**: Option 2: Hashed index with a statused lifecycle.
 
-Implement a SHA-256 hashed key store with `Active` / `Rotated` / `Revoked` lifecycle states, a configurable grace period, a `verify_api_key` dependency wired into live routes, a rotate endpoint, tombstone revocation, and an `agentshield.security.key_rotation` telemetry event. Keys optionally carry a permissions allowlist and are enforced by the existing `require_permission` machinery.
+Implement a SHA-256 hashed key store with `Active` / `Rotated` / `Revoked` lifecycle states, a configurable grace period, a `verify_api_key` dependency wired into live routes, a rotate endpoint, a rescope endpoint, tombstone revocation, and an `agentshield.security.key_rotation` telemetry event. Keys optionally carry a permissions allowlist and are enforced by the existing `require_permission` machinery.
 
 ## Rationale
 
 The failure mode that matters is rotation under live traffic: a tenant admin rotates a key exactly when it is in use, so the gateway needs a transition path, not a wall. The grace window handles that. Storing hashes instead of raw secrets removes the single worst breach scenario for a credential store and costs one `hashlib.sha256` call per request, which is negligible against the existing Redis round trip. Making keys carry scopes reuses the RBAC contract from spec 0005 instead of inventing a parallel authorization model; a machine principal is just another principal with permissions. Revocation as a tombstone keeps audit history and lets the verify layer distinguish revoked from unknown, which is what the auditor story needs.
+
+The rescope write (Option 4 weighed against keeping scopes fixed at creation) is the same argument as rotation applied to permissions: narrowing a key is a routine operation a tenant does for exactly the same reason it rotates one, and forcing a revoke plus recreate makes it an outage. The write is safe to add because the constraint that matters already exists. Creation refuses a scope the caller does not hold, and rescoping reuses that exact check, so the one power a key manager gains by editing rather than creating is the power to hand a sibling key reach no greater than its own. A `Revoked` key is a tombstone, so its scopes are frozen rather than editable, which keeps revocation final.
