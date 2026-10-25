@@ -50,6 +50,12 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-http://localhost:4200/billing/success}
       STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:-http://localhost:4200/billing/cancel}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+      STRIPE_PRODUCT_STARTER: ${STRIPE_PRODUCT_STARTER:-}
+      STRIPE_PRODUCT_PRO: ${STRIPE_PRODUCT_PRO:-}
+      STRIPE_PRODUCT_ENTERPRISE: ${STRIPE_PRODUCT_ENTERPRISE:-}
       # The health probe posts here to decide whether shipping works. Verification
       # is never disabled, so the CA has to be reachable, but a missing file
       # reports degraded with a reason rather than refusing to boot the gateway.
@@ -164,6 +170,7 @@ services:
       SPLUNK_HEC_INDEX: ${SPLUNK_HEC_INDEX:-main}
       SPLUNK_HEC_SOURCETYPE: ${SPLUNK_HEC_SOURCETYPE:-agentshield:telemetry}
       TELEMETRY_DLQ_MAX: ${TELEMETRY_DLQ_MAX:-10000}
+      TELEMETRY_USER_ID_HMAC_KEY: ${TELEMETRY_USER_ID_HMAC_KEY:?Set TELEMETRY_USER_ID_HMAC_KEY in .env}
     volumes:
       # One public certificate, read only. No signing key is mounted here.
       - splunk-ca:/etc/agentshield/splunk-ca:ro

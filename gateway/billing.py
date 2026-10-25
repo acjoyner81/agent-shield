@@ -51,11 +51,28 @@ def ensure_stripe_customer(tenant_id: str, email: Optional[str] = None) -> str:
     if existing:
         return existing
 
+    # Try to recover customer from Stripe by tenant_id metadata
+    try:
+        customers = stripe.Customer.list(limit=100)
+        matches = []
+        for c in customers.auto_paging_iter():
+            if getattr(c, "metadata", None) and c.metadata.get("tenant_id") == tenant_id:
+                matches.append(c)
+        if len(matches) == 1:
+            r.set(customer_key, matches[0].id)
+            return matches[0].id
+        if len(matches) > 1:
+            raise HTTPException(status_code=409, detail="Multiple Stripe customers found for this tenant")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     customer = stripe.Customer.create(
         metadata={"tenant_id": tenant_id},
         email=email,
     )
-    r.set(customer_key, customer.id, ex=ENTITLEMENT_TTL)
+    r.set(customer_key, customer.id)
     return customer.id
 
 
@@ -105,6 +122,54 @@ async def create_checkout_session(
 
     try:
         customer_id = ensure_stripe_customer(tenant_id)
+        
+        # Check existing subscriptions
+        subscriptions = stripe.Subscription.list(customer=customer_id, status="all", limit=100)
+        all_subs = []
+        for s in getattr(subscriptions, "auto_paging_iter", lambda: [])():
+            all_subs.append(s)
+        if not all_subs and hasattr(subscriptions, "data"):
+            all_subs = list(subscriptions.data)
+        
+        # Check for active/trialing subscriptions
+        eligible = [s for s in all_subs if getattr(s, "status", None) in ("active", "trialing")]
+        if len(eligible) == 1:
+            sub = eligible[0]
+            items = getattr(getattr(sub, "items", None), "data", []) or []
+            base_item = None
+            base_product_id = None
+            for item in items:
+                price = getattr(item, "price", None)
+                product_id = getattr(price, "product", None) if price else None
+                if isinstance(product_id, str) and product_id in PRODUCT_TIER_MAP:
+                    base_item = item
+                    base_product_id = product_id
+                    break
+            
+            if base_item:
+                current_tier = PRODUCT_TIER_MAP.get(base_product_id)
+                target_tier = None
+                for t, p in TIER_TO_PRICE_MAP.items():
+                    if p == target_price:
+                        target_tier = t
+                        break
+                
+                if current_tier == target_tier and current_tier:
+                    return {"action": "unchanged", "tier": current_tier, "subscription_id": getattr(sub, "id")}
+                
+                try:
+                    stripe.SubscriptionItem.modify(
+                        base_item.id,
+                        price=target_price,
+                        proration_behavior="create_prorations",
+                    )
+                    return {"action": "updated", "tier": target_tier or current_tier, "subscription_id": getattr(sub, "id")}
+                except stripe.error.StripeError as e:
+                    raise HTTPException(status_code=400, detail=f"Stripe error: {e.user_message}")
+        elif len(eligible) > 1:
+            raise HTTPException(status_code=409, detail="Multiple active subscriptions")
+        
+        # If no active subscription or modification failed/wasn't possible, create a new checkout session.
         session = stripe.checkout.Session.create(
             customer=customer_id,
             mode="subscription",
@@ -112,11 +177,16 @@ async def create_checkout_session(
             success_url=settings.stripe_success_url,
             cancel_url=settings.stripe_cancel_url,
             metadata={"tenant_id": tenant_id},
+            subscription_data={"metadata": {"tenant_id": tenant_id}},
         )
+        return {"checkoutUrl": session.url, "session_id": session.id, "action": "checkout"}
+
+    except HTTPException:
+        raise
     except stripe.error.StripeError as e:
         raise HTTPException(status_code=400, detail=f"Stripe error: {e.user_message}")
 
-    return {"checkoutUrl": session.url, "session_id": session.id}
+    return {"checkoutUrl": session.url, "session_id": session.id, "action": "checkout"}
 
 
 @router.post("/portal")

@@ -115,6 +115,20 @@ describe('Observability audit stream', () => {
     });
   });
 
+  describe('the Judge column', () => {
+    it('explains when no evaluation result is available', () => {
+      expect(run('evalPassed', 'valueFormatter', null)).toBe('Not evaluated');
+    });
+
+    it('shows a passing evaluation result', () => {
+      expect(run('evalPassed', 'valueFormatter', true)).toBe('Passed');
+    });
+
+    it('shows a failing evaluation result', () => {
+      expect(run('evalPassed', 'valueFormatter', false)).toBe('Failed');
+    });
+  });
+
   describe('average latency', () => {
     it('is a dash when nothing was measured', () => {
       telemetry.logs.set([KEY_ROTATION]);

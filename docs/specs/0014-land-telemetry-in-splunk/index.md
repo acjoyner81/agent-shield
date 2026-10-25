@@ -13,6 +13,10 @@ makes it reproducible from the repo rather than living inside one running contai
 and puts it on the health page so a failure like this cannot hide again. It also gives
 operators a way to replay the 366 events already stranded.
 
+Before the aggregator sends an event to Splunk, it replaces a stable user identifier
+with a tenant scoped keyed pseudonym so events remain correlatable within a tenant
+without exporting the source value.
+
 Reasoning, options, and the evidence behind this: see `rationale.md`.
 
 ## Requirements
@@ -30,6 +34,8 @@ Reasoning, options, and the evidence behind this: see `rationale.md`.
   so shipping telemetry cannot leak it.
 - As a tenant, I want another tenant's telemetry volume and failures not to be visible to
   me through a shared health endpoint.
+- As a security reviewer, I want stable user identifiers pseudonymized before Splunk
+  receives them, so operators can correlate events without seeing the source identifier.
 
 **Acceptance criteria** (the contract):
 - **AC-1**: An event written to `telemetry:queue` appears in the Splunk index within the
@@ -80,6 +86,19 @@ Reasoning, options, and the evidence behind this: see `rationale.md`.
 - **AC-12**: A collector response whose HTTP status is 200 but whose body reports a non
   zero code is treated as a failed batch. Those events reach the dead letter queue instead
   of being acknowledged and lost, which is what the current code does today.
+- **AC-13**: Before any event is sent to Splunk, a non empty top level `user_id` string is
+  replaced with `hmac-sha256:v1:<hex digest>`. Compute HMAC-SHA256 with the decoded bytes
+  from `TELEMETRY_USER_ID_HMAC_KEY` over
+  `b"agentshield-splunk-user-id:v1\0" + UTF8(tenant_id) + b"\0" + UTF8(user_id)`.
+  The same tenant, source identifier, and key produce the same value; different tenants
+  produce different values. The `v1` label identifies the transform format, not the key.
+  The source identifier is never included in the Splunk request or a dead letter payload.
+  An absent or null `user_id` stays absent or null. A malformed non-string value fails
+  closed on its own event: that event is not sent and is dead-lettered with `user_id`
+  omitted. Valid events in the same batch still ship. Missing or invalid key configuration
+  prevents the aggregator from starting. The original event in the internal queue remains
+  unchanged. The existing portal history projection does not include `user_id` and remains
+  unchanged.
 
 **Amendments 2026-10-07** (from the verify run, evidence in
 `docs/reviews/2026-10-07-telemetry-verify.md`): AC-2's certificate authority path named
@@ -92,6 +111,11 @@ without asking whether work was waiting, which degraded an idle healthy stack af
 window elapsed; the contract now gates staleness on undelivered work, matching the fix
 in `gateway/main.py`.
 
+**Amendment 2026-10-23**: AC-13 adds keyed pseudonymization for the stable `user_id`
+  before the Splunk boundary. The raw event remains in the internal queue and history;
+  the shipping transform and any dead letter copy use the pseudonymized value. The key is
+  a required, stable secret supplied to the aggregator and is not committed.
+
 ## Decision
 
 **Chosen option**: Option 1: Fix in place, keep the aggregator, make the deployment and the
@@ -102,6 +126,12 @@ The scheme, the certificate trust, and the deployment are corrected in place, th
 duplicate shipping paths are retired rather than migrated, and the missing operator
 surfaces (health entry, replay, dropped accounting) are added.
 
+**Amendment decision**: Use HMAC-SHA256 with a dedicated secret to pseudonymize the
+top level `user_id` before shipping to Splunk. Preserve the raw event in internal queue
+and history, and use the transformed event for shipping and dead letter storage. The
+deterministic pseudonym supports event correlation without exporting the stable source
+identifier.
+
 ## Feature design
 
 **Data model sketch**:
@@ -111,10 +141,16 @@ Redis, all under the existing `telemetry:` namespace. No new database, no schema
 | Key | Type | Fields | Rule |
 |---|---|---|---|
 | `telemetry:queue` | Stream | `payload` (string, required) | Exists today. The only ingest path after AC-5. |
-| `telemetry:dlq` | List (capped) | raw event JSON strings | Exists today. **Every writer pushes at the same end** and replay pops that end. Cap and drop accounting added by AC-8. |
+| `telemetry:dlq` | List (capped) | scrubbed outbound event JSON strings | Exists today. **Every writer pushes at the same end** and replay pops that end. Cap and drop accounting added by AC-8. The source `user_id` is never retained here. |
 | `telemetry:ship` | Hash | `last_attempt` (epoch seconds), `last_success` (epoch seconds, absent until the first success), `last_error` (string), `consecutive_failures` (integer) | New. Written by the aggregator on every batch outcome, attempt and success alike. Powers AC-7 and AC-11. |
 | `telemetry:dlq:dropped` | Integer counter | count | New. Incremented in the same script as the trim. Powers AC-8. |
 | `telemetry:redrive:lock` | String with a 30 second expiry | holder id, a `uuid4` | New. Exists to return 409 to a second replay, not to make replay safe, which the atomic pop already guarantees. Released explicitly in a `finally`, and the expiry covers a holder that dies. |
+
+The queue retains the original internal event, while the portal history projection
+already omits `user_id`. At the Splunk boundary, the aggregator replaces a non empty
+string in the top level `user_id` field with `hmac-sha256:v1:<hex digest>`. It does not
+modify the queued event in place. The pseudonymized payload is the one posted to Splunk
+and retained in the dead letter queue.
 
 **Push direction is a correctness requirement, not a style choice.** Today
 `gateway/aggregator.py:148` pushes with `RPUSH` while `gateway/metering.py:166,265` push
@@ -188,7 +224,10 @@ after the script, on the same client.
 
 | Action | Value produced / displayed | Source |
 |---|---|---|
-| Ship batch | Splunk payload | The `payload` field read from `telemetry:queue` |
+| Ship batch | queued event | The `payload` field read from `telemetry:queue` |
+| Ship batch | outbound payload | A copy of the queued event after existing personal data scrubbing and `user_id` pseudonymization |
+| Ship batch | pseudonymized `user_id` | HMAC-SHA256 of `agentshield-splunk-user-id:v1`, a zero byte, the top level `tenant_id` from the queued event encoded as UTF-8, a zero byte, and the original top level `user_id`, using the decoded `TELEMETRY_USER_ID_HMAC_KEY`, formatted as `hmac-sha256:v1:<hex digest>` |
+| Dead letter | retained payload | The scrubbed outbound copy; malformed top level `user_id` is omitted, while the original queue entry and existing portal history projection remain unchanged |
 | Ship batch | outcome | The collector response **body**, parsed for `code`; an HTTP status alone is not the outcome |
 | Ship batch | `last_attempt` | The gateway's own UTC clock, `time.time()`, written before each attempt |
 | Ship batch | `last_success` | The same clock, written only when the response body reports code 0 |
@@ -227,6 +266,8 @@ window and flip the overall status on every route.
 - No Splunk private key is readable by any service other than Splunk.
 - Personal data scrubbing runs before the POST, not after, so nothing unmasked ever
   reaches the network.
+- The raw `user_id` never reaches Splunk or the dead letter queue. A keyed pseudonym is
+  stable only while the configured HMAC key remains the same.
 
 **Security model**:
 - The collector token stays a secret environment variable. It is never written to the
@@ -249,6 +290,15 @@ window and flip the overall status on every route.
   safe for any tenant member to see.
 - The new scope is not available to tenants by default, so shipping telemetry stays a
   platform operator action rather than a tenant one.
+- `user_id` is stable and linkable account data even when it is not a direct identifier.
+  Only the outbound copy is pseudonymized; the raw value remains in the internal queue
+  under its existing access controls. The portal history projection already omits
+  `user_id`.
+- `TELEMETRY_USER_ID_HMAC_KEY` is an aggregator secret. It must be stable across restarts
+  and deployments, base64 encoding of at least 32 random bytes, and must never be logged
+  or committed. Rotating it changes pseudonyms and breaks correlation between events
+  produced with the old and new keys. A key rotation therefore needs an explicit
+  operational window.
 
 **Configuration required**:
 - `SPLUNK_HEC_URL`: defaults to `https://splunk:8088/services/collector/raw`. The scheme is
@@ -266,6 +316,11 @@ window and flip the overall status on every route.
 - `SPLUNK_HEALTH_MAX_SHIP_AGE_SEC`: default `300`. Above this the probe reports degraded
   when a ship has been attempted, which is what catches a stalled pipeline.
 - `TELEMETRY_DLQ_MAX`: default `10000`, the cap behind AC-8.
+- `TELEMETRY_USER_ID_HMAC_KEY`: required, dedicated secret used only for outbound
+  `user_id` pseudonymization. It is base64 encoding of at least 32 random bytes. The
+  aggregator decodes and validates it at startup, and refuses to start if it is missing,
+  malformed, or too short. Set it through the local environment or deployment secret
+  store, never in a committed file.
 - `SPLUNK_ENABLED`: removed. It is currently in `.env` set to `false` and read by zero
   lines of code, so it reads as though shipping is deliberately off while it is actually
   on and failing.
@@ -298,6 +353,16 @@ window and flip the overall status on every route.
   verifies **AC-10**
 - Contract surface: assert `/v1/telemetry/redrive` is absent from the published schema,
   verifies **AC-9**
+- Pseudonymization: confirm the exact HMAC-SHA256 output for a fixed test key and
+  tenant and identifier, confirm a repeated identifier in that tenant is stable and the
+  same identifier in another tenant differs, and confirm the original value is absent
+  from the Splunk request and the dead letter payload, verifies **AC-13**
+- Key configuration: missing, invalid Base64, and decoded keys shorter than 32 bytes
+  prevent aggregator startup, while a valid configured key survives a restart unchanged,
+  verifies **AC-13**
+- Null and invalid identifiers: absent or null `user_id` remains unchanged; a non-string
+  value is dead-lettered without `user_id`, while valid neighbors in the same batch ship,
+  verifies **AC-13**
 
 ## Build plan
 
@@ -333,6 +398,10 @@ already runs.
     excluded from the published schema, then seed the scope and document it in spec 0012,
     satisfies **AC-9**, **AC-10**
 12. Drain the 366 stranded events and confirm the queue reaches zero, satisfies **AC-9**
+13. Add the required HMAC key configuration and pseudonymize `user_id` in the outbound
+    transform. Dead-letter malformed events individually without `user_id`, while valid
+    neighbors in the same batch ship. Leave the source queue entry and the existing portal
+    history projection unchanged, satisfies **AC-13**
 
 ## Migration plan
 
@@ -354,12 +423,20 @@ except the Splunk recreate in phase 1, which is a one way cutover by design.
    the redrive endpoint behind `telemetry:admin` once the scope is seeded.
 5. **Replay.** Drain the 366 stranded events. Separate from the cutover on purpose, so a
    replay problem cannot block shipping from working.
+6. **Pseudonymization.** Configure the dedicated key as a secret, deploy the updated
+   aggregator, and verify the Splunk event and dead letter copy contain only the
+   pseudonym. Existing Splunk events are not rewritten by this change.
 
 **Rollback**: phases 2 through 5 revert by redeploying the previous image. Events keep
 queueing in Redis throughout, so nothing is lost by reverting. Phase 1 cannot be reverted
 by redeploying, because recreating `splunk` with a volume starts from an empty
 configuration; the way back is removing the volumes and starting the container without
 them, which returns to the hand made override being required.
+
+After phase 6, do not redeploy an image that predates pseudonymization while the
+aggregator is enabled, because it would export raw `user_id` values again. Pause shipping
+during rollback, or use a corrected image that preserves AC-13. The HMAC key must remain
+stable across an ordinary restart; changing it creates a new pseudonym namespace.
 
 **Risks**:
 - If Splunk regenerates its certificate authority, consumers stop shipping until the
@@ -403,6 +480,10 @@ them, which returns to the hand made override being required.
   outside this repository breaks. Task 9 checks for callers first.
 - Standardising the dead letter push direction means editing the metering module, which was
   not in the original plan for this slice.
+- Deterministic pseudonyms allow event correlation over time. They are still linkable
+  data, and the key becomes a new operational secret that must be protected and backed up.
+- Existing Splunk events are not pseudonymized retroactively. A prior event that contains
+  a raw identifier remains there until it is removed through Splunk's retention controls.
 
 **Neutral**:
 - The aggregator stays a separate container. With only one collector call site left, whether

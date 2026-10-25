@@ -5,6 +5,7 @@ did not exist anywhere in the module, so a Splunk outage crashed the aggregator
 with NameError instead of dead-lettering the batch. The suite drives the real
 `run_aggregator` failure path against fakeredis, not just the helper.
 """
+import base64
 import json
 
 import fakeredis
@@ -12,9 +13,19 @@ import pytest
 
 import gateway.aggregator as aggregator
 
+TEST_HMAC_KEY = bytes(range(32))
+TEST_HMAC_KEY_B64 = base64.b64encode(TEST_HMAC_KEY).decode("ascii")
+
 
 class StopLoop(Exception):
     """Raised out of `run_aggregator` once the scenario has run its course."""
+
+
+@pytest.fixture(autouse=True)
+def configure_hmac_key(monkeypatch):
+    monkeypatch.setattr(
+        aggregator, "TELEMETRY_USER_ID_HMAC_KEY", TEST_HMAC_KEY_B64
+    )
 
 
 @pytest.mark.asyncio
@@ -100,6 +111,102 @@ async def test_run_aggregator_refuses_to_ship_without_a_ca(monkeypatch):
         await aggregator.run_aggregator()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoded_key", ["", "not-base64", base64.b64encode(b"short").decode()])
+async def test_run_aggregator_refuses_invalid_hmac_keys(monkeypatch, encoded_key):
+    monkeypatch.setattr(aggregator, "SPLUNK_HEC_TOKEN", "test-collector-token")
+    monkeypatch.setattr(aggregator, "TELEMETRY_USER_ID_HMAC_KEY", encoded_key)
+
+    with pytest.raises(SystemExit):
+        await aggregator.run_aggregator()
+
+
+def test_decode_hmac_key_requires_at_least_32_bytes_and_is_stable():
+    assert aggregator.decode_user_id_hmac_key(TEST_HMAC_KEY_B64) == TEST_HMAC_KEY
+    assert aggregator.decode_user_id_hmac_key(TEST_HMAC_KEY_B64) == TEST_HMAC_KEY
+
+
+def test_prepare_payload_pseudonymizes_by_tenant_and_preserves_null_values():
+    raw = '{"tenant_id":"tenant_alpha","user_id":"user-123"}'
+    other_tenant = '{"tenant_id":"tenant_beta","user_id":"user-123"}'
+    absent = '{"tenant_id":"tenant_alpha","message":"no user"}'
+    null_user = '{"tenant_id":"tenant_alpha","user_id":null}'
+    empty_user = '{"tenant_id":"tenant_alpha","user_id":""}'
+
+    prepared, malformed = aggregator.prepare_payload(raw, TEST_HMAC_KEY)
+    prepared_again, _ = aggregator.prepare_payload(raw, TEST_HMAC_KEY)
+    prepared_other, _ = aggregator.prepare_payload(other_tenant, TEST_HMAC_KEY)
+
+    assert not malformed
+    assert json.loads(prepared)["user_id"] == (
+        "hmac-sha256:v1:"
+        "530baf2c221c375aa6820a0a38d350fc2155d78bdb51a4009dee7b25783f5836"
+    )
+    assert json.loads(prepared)["user_id"] == json.loads(prepared_again)["user_id"]
+    assert json.loads(prepared)["user_id"] != json.loads(prepared_other)["user_id"]
+    assert "user-123" not in prepared
+    assert aggregator.prepare_payload(absent, TEST_HMAC_KEY) == (absent, False)
+    assert aggregator.prepare_payload(null_user, TEST_HMAC_KEY) == (null_user, False)
+    assert aggregator.prepare_payload(empty_user, TEST_HMAC_KEY) == (empty_user, False)
+
+
+async def _claimed_batch_many(r, payloads):
+    await aggregator.ensure_consumer_group(r)
+    for payload in payloads:
+        await r.xadd(aggregator.QUEUE_KEY, {"payload": payload})
+    entries = await r.xreadgroup(
+        aggregator.GROUP_NAME,
+        aggregator.CONSUMER_NAME,
+        {aggregator.QUEUE_KEY: ">"},
+        count=len(payloads),
+    )
+    return [
+        (message_id, fields["payload"])
+        for _, messages in entries
+        for message_id, fields in messages
+    ]
+
+
+@pytest.mark.asyncio
+async def test_malformed_user_id_is_dead_lettered_without_blocking_valid_neighbors(monkeypatch):
+    r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    invalid_raw = '{"tenant_id":"tenant_alpha","user_id":7,"message":"bad event"}'
+    valid_raw = '{"tenant_id":"tenant_alpha","user_id":"user-123","message":"good event"}'
+    batch = await _claimed_batch_many(r, [invalid_raw, valid_raw])
+    shipped = []
+    stdout_payloads = []
+
+    async def record_ship(client, payloads):
+        shipped.extend(payloads)
+
+    async def record_stdout(payloads):
+        stdout_payloads.extend(payloads)
+
+    monkeypatch.setattr(aggregator, "ship_to_splunk", record_ship)
+    monkeypatch.setattr(aggregator, "dump_to_stdout", record_stdout)
+
+    await aggregator.ship_batch(
+        _CollectorClient({"code": 0, "text": "Success"}),
+        r,
+        batch,
+        TEST_HMAC_KEY,
+    )
+
+    dead_lettered = json.loads((await r.lrange(aggregator.DLQ_KEY, 0, -1))[0])
+    shipped_event = json.loads(shipped[0])
+    assert "user_id" not in dead_lettered
+    assert dead_lettered["message"] == "bad event"
+    assert shipped_event["user_id"].startswith("hmac-sha256:v1:")
+    assert "user-123" not in shipped[0]
+    assert "user_id" not in stdout_payloads[0]
+    assert [fields["payload"] for _, fields in await r.xrange(aggregator.QUEUE_KEY)] == [
+        invalid_raw,
+        valid_raw,
+    ]
+    pending = await r.xpending(aggregator.QUEUE_KEY, aggregator.GROUP_NAME)
+    assert _pending_count(pending) == 0
+
+
 async def _noop(batch):
     return None
 
@@ -174,7 +281,7 @@ async def test_a_rejected_batch_dead_letters_and_never_reads_as_shipped(monkeypa
     batch = await _claimed_batch(r, payload)
 
     await aggregator.ship_batch(
-        _CollectorClient({"code": 3, "text": "No data"}), r, batch
+        _CollectorClient({"code": 3, "text": "No data"}), r, batch, TEST_HMAC_KEY
     )
 
     assert await r.lrange(aggregator.DLQ_KEY, 0, -1) == [payload]
@@ -197,7 +304,7 @@ async def test_an_accepted_batch_ships_without_touching_the_dead_letter_queue(mo
     batch = await _claimed_batch(r, payload)
 
     await aggregator.ship_batch(
-        _CollectorClient({"code": 0, "text": "Success"}), r, batch
+        _CollectorClient({"code": 0, "text": "Success"}), r, batch, TEST_HMAC_KEY
     )
 
     assert await r.llen(aggregator.DLQ_KEY) == 0

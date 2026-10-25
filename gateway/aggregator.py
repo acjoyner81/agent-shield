@@ -8,13 +8,13 @@ the certificate trust, and the retry policy are configured in exactly one place.
 
 Three invariants hold on every batch, in this order:
 
-1. Personal data is scrubbed *before* the POST, so nothing unmasked leaves the
-   process.
+1. Personal data is scrubbed and stable user identifiers are pseudonymized
+   *before* the POST, so neither leaves the process unprotected.
 2. An HTTP 200 whose body reports a non-zero `code` is a **failure**. Splunk
    answers 200 with `{"code": 3, "text": "No data"}` for an event it refuses, and
    the previous implementation acknowledged those events away and destroyed them.
-3. The stream entries are acknowledged last, and only once the batch is either
-   confirmed shipped or safely copied into the dead letter queue.
+3. Each stream entry is acknowledged only after it is either confirmed shipped
+   or safely copied into the dead letter queue.
 
 The transport is TLS and the certificate is verified against the CA file named by
 `SPLUNK_HEC_CA`. Verification is never disabled: the reason there is no flag to
@@ -23,6 +23,10 @@ quietly once.
 """
 
 import asyncio
+import base64
+import binascii
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -52,6 +56,7 @@ SPLUNK_HEC_CA = os.environ.get("SPLUNK_HEC_CA", "")
 SPLUNK_HEC_CA_WAIT_SEC = int(os.environ.get("SPLUNK_HEC_CA_WAIT_SEC", "300"))
 SPLUNK_HEC_INDEX = os.environ.get("SPLUNK_HEC_INDEX", "main")
 SPLUNK_HEC_SOURCETYPE = os.environ.get("SPLUNK_HEC_SOURCETYPE", "agentshield:telemetry")
+TELEMETRY_USER_ID_HMAC_KEY = os.environ.get("TELEMETRY_USER_ID_HMAC_KEY", "")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "100"))
 BATCH_TIMEOUT_SEC = int(os.environ.get("BATCH_TIMEOUT_SEC", "5"))
@@ -104,13 +109,59 @@ def scrub_value(value: Any) -> Any:
     return value
 
 
-def scrub_payload(raw: str) -> str:
-    """Scrub one queued payload, leaving it byte-identical if it is not JSON."""
+def decode_user_id_hmac_key(encoded_key: str) -> bytes:
+    """Decode and validate the dedicated outbound user identifier key."""
+    if not encoded_key:
+        raise SystemExit(
+            "TELEMETRY_USER_ID_HMAC_KEY is not set. The aggregator refuses to "
+            "ship user identifiers without the required pseudonymization key."
+        )
+
+    try:
+        key = base64.b64decode(encoded_key, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise SystemExit(
+            "TELEMETRY_USER_ID_HMAC_KEY must be valid Base64."
+        ) from exc
+
+    if len(key) < 32:
+        raise SystemExit(
+            "TELEMETRY_USER_ID_HMAC_KEY must decode to at least 32 random bytes."
+        )
+    return key
+
+
+def prepare_payload(raw: str, key: bytes) -> Tuple[str, bool]:
+    """Scrub and pseudonymize one queued event without changing the source."""
     try:
         parsed = json.loads(raw)
     except (TypeError, ValueError):
-        return scrub_pii(raw)
-    return json.dumps(scrub_value(parsed), separators=(",", ":"))
+        return scrub_pii(raw), False
+
+    malformed_user_id = False
+    if isinstance(parsed, dict):
+        user_id = parsed.get("user_id")
+        if user_id is not None:
+            if not isinstance(user_id, str):
+                parsed.pop("user_id", None)
+                malformed_user_id = True
+            elif user_id:
+                tenant_id = parsed.get("tenant_id")
+                if not isinstance(tenant_id, str):
+                    parsed.pop("user_id", None)
+                    malformed_user_id = True
+                else:
+                    message = (
+                        b"agentshield-splunk-user-id:v1\0"
+                        + tenant_id.encode("utf-8")
+                        + b"\0"
+                        + user_id.encode("utf-8")
+                    )
+                    digest = hmac.new(key, message, hashlib.sha256).hexdigest()
+                    parsed["user_id"] = f"hmac-sha256:v1:{digest}"
+
+    payload = json.dumps(scrub_value(parsed), separators=(",", ":"))
+    return payload, malformed_user_id
 
 
 class ShipRejected(Exception):
@@ -335,14 +386,48 @@ async def collect_batch(r, batch: List[Tuple[str, str]]) -> None:
                     batch.append((message_id, payload))
 
 
-async def ship_batch(client: httpx.AsyncClient, r, batch: List[Tuple[str, str]]) -> None:
+async def ship_batch(
+    client: httpx.AsyncClient, r, batch: List[Tuple[str, str]], hmac_key: bytes
+) -> None:
     """Ship one batch with retries, then either ack it or dead letter it.
 
-    The acknowledgement is the load bearing part and happens last. An event does
-    not leave `telemetry:queue` until the collector reports code 0 or the event
-    is in the dead letter queue, never one instead of the other.
+    Each event leaves `telemetry:queue` only after the collector reports code 0
+    or the event is safely in the dead letter queue, never one instead of the
+    other.
     """
-    payloads = [scrub_payload(payload) for _, payload in batch]
+    valid_batch: List[Tuple[str, str]] = []
+    payloads: List[str] = []
+    malformed_ids: List[str] = []
+    malformed_payloads: List[str] = []
+    for message_id, raw_payload in batch:
+        payload, malformed_user_id = prepare_payload(raw_payload, hmac_key)
+        if malformed_user_id:
+            malformed_ids.append(message_id)
+            malformed_payloads.append(payload)
+        else:
+            valid_batch.append((message_id, raw_payload))
+            payloads.append(payload)
+
+    if malformed_ids:
+        pushed, dropped, depth = await dlq_push(
+            r, malformed_payloads, TELEMETRY_DLQ_MAX
+        )
+        await dump_to_stdout(malformed_payloads)
+        await r.xack(
+            QUEUE_KEY,
+            GROUP_NAME,
+            *malformed_ids,
+        )
+        logger.warning(
+            "Dead lettered %d events with malformed user_id: pushed=%d dropped=%d depth=%d",
+            len(malformed_ids),
+            pushed,
+            dropped,
+            depth,
+        )
+
+    if not valid_batch:
+        return
 
     reason: Optional[str] = None
     for attempt in range(1, MAX_RETRIES + 1):
@@ -351,7 +436,9 @@ async def ship_batch(client: httpx.AsyncClient, r, batch: List[Tuple[str, str]])
             await ship_to_splunk(client, payloads)
             await record_success(r)
             logger.info("Successfully shipped %d logs to Splunk.", len(payloads))
-            await r.xack(QUEUE_KEY, GROUP_NAME, *[mid for mid, _ in batch])
+            await r.xack(
+                QUEUE_KEY, GROUP_NAME, *[mid for mid, _ in valid_batch]
+            )
             return
         except Exception as exc:
             reason = f"{type(exc).__name__}: {exc}".strip()
@@ -378,7 +465,7 @@ async def ship_batch(client: httpx.AsyncClient, r, batch: List[Tuple[str, str]])
         "Dead letter queue: pushed=%d dropped=%d depth=%d", pushed, dropped, depth
     )
     await dump_to_stdout(payloads)
-    await r.xack(QUEUE_KEY, GROUP_NAME, *[mid for mid, _ in batch])
+    await r.xack(QUEUE_KEY, GROUP_NAME, *[mid for mid, _ in valid_batch])
 
 
 async def run_aggregator() -> None:
@@ -388,6 +475,7 @@ async def run_aggregator() -> None:
             "sent on every batch, so the aggregator refuses to start without it."
         )
 
+    hmac_key = decode_user_id_hmac_key(TELEMETRY_USER_ID_HMAC_KEY)
     ca_path = await wait_for_ca()
     logger.info(
         "Starting Telemetry Aggregator (Batch: %d, Timeout: %ds, Endpoint: %s, CA: %s)",
@@ -439,14 +527,14 @@ async def run_aggregator() -> None:
                 logger.info(
                     "Recovered %d pending entries via XAUTOCLAIM", len(reclaimed)
                 )
-                await ship_batch(client, r, reclaimed)
+                await ship_batch(client, r, reclaimed, hmac_key)
                 continue
 
             batch: List[Tuple[str, str]] = []
             await collect_batch(r, batch)
             if not batch:
                 continue
-            await ship_batch(client, r, batch)
+            await ship_batch(client, r, batch, hmac_key)
 
 
 if __name__ == "__main__":

@@ -70,10 +70,13 @@ def blocks_for(section):
     return blocks
 
 
+KNOWN_ROUTES = {"/docs", "/dashboard", "/logs", "/keys", "/models", "/assistant", "/api/docs"}
+
+
 def main():
     documents, sections = [], []
     ids = set()
-    known_routes = {"/docs", "/dashboard", "/logs", "/keys", "/models", "/assistant"}
+    known_routes = set(KNOWN_ROUTES)
     for doc in MANIFEST["documents"]:
         content = []
         for section in parse_document(doc):

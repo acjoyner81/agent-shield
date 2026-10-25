@@ -93,4 +93,54 @@ describe('Help center', () => {
     expect(sections[0].querySelector('p')?.textContent).toContain('Create an API key.');
     expect(sections[1].querySelector('p')?.textContent).toContain('When something fails.');
   });
+
+  it('renders /api/ links as plain href and supports list item links', () => {
+    const corpus: HelpCorpus = {
+      documents: [
+        {
+          document_id: 'getting-started',
+          title: 'Get started with AgentShield',
+          sections: [
+            {
+              source_id: 'section:first-request',
+              section_id: 'first-request',
+              document_id: 'getting-started',
+              title: 'Get started with AgentShield',
+              heading: 'Make your first request',
+              body: 'Try console',
+              blocks: [
+                {
+                  type: 'paragraph' as const,
+                  text: 'Try the console',
+                  parts: [
+                    { text: 'Try the ', url: undefined },
+                    { text: 'API console', url: '/api/docs' },
+                  ],
+                },
+                {
+                  type: 'list' as const,
+                  text: '',
+                  items: ['Go to [API keys](/keys)', 'Open [API console](/api/docs)'],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      sections: [],
+      suggestions: [],
+    };
+    const fixture = TestBed.createComponent(Docs);
+    fixture.detectChanges();
+    http.expectOne('/help-center-content.json').flush(corpus);
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const apiLinks = Array.from(el.querySelectorAll('a')).filter((a) => a.getAttribute('href') === '/api/docs');
+    expect(apiLinks.length).toBeGreaterThanOrEqual(2);
+    for (const link of apiLinks) {
+      expect(link.getAttribute('routerLink')).toBeNull();
+    }
+    const keysLink = Array.from(el.querySelectorAll('a')).find((a) => a.getAttribute('href') === '/keys' || a.getAttribute('ng-reflect-router-link') === '/keys' || a.textContent?.includes('API keys'));
+    expect(keysLink).toBeTruthy();
+  });
 });

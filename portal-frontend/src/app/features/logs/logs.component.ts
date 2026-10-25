@@ -174,7 +174,13 @@ export class LogsComponent implements OnInit {
       width: 105,
       valueFormatter: (params) => (params.value == null ? '—' : `${params.value}ms`),
     },
-    { field: 'evalPassed', headerName: 'Judge', width: 95 },
+    {
+      field: 'evalPassed',
+      headerName: 'Judge',
+      width: 120,
+      valueFormatter: (params) =>
+        params.value == null ? 'Not evaluated' : params.value ? 'Passed' : 'Failed',
+    },
     { field: 'traceId', headerName: 'Dynatrace trace', flex: 1 },
   ];
   ngOnInit(): void {

@@ -77,7 +77,12 @@ def test_rendered_and_flat_sections_share_one_shape(built):
 
 def test_in_content_links_target_known_routes(built):
     """A block link to an unrouted URL is a dead click in the Help Center."""
-    known = {"/docs", "/dashboard", "/logs", "/keys", "/models", "/assistant"}
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(REPO_ROOT / "docs" / "help-center"))
+    import build as help_center_build
+
+    known = set(help_center_build.KNOWN_ROUTES)
     for document in built["documents"]:
         for section in document["sections"]:
             for block in section["blocks"]:

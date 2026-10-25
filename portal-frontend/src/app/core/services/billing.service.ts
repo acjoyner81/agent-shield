@@ -14,16 +14,25 @@ export class BillingService {
    */
   checkout(tier: string): void {
     this.http
-      .post<{ checkoutUrl: string }>('/api/v1/billing/checkout', { tier }, { context: USER_ACTION })
+      .post<any>('/api/v1/billing/checkout', { tier }, { context: USER_ACTION })
       .subscribe({
-        next: ({ checkoutUrl }) => {
-          if (checkoutUrl.startsWith('https://checkout.stripe.com/')) {
-            window.location.assign(checkoutUrl);
+        next: (res) => {
+          if (res?.action === 'checkout' && res?.checkoutUrl?.startsWith('https://checkout.stripe.com/')) {
+            window.location.assign(res.checkoutUrl);
+            return;
+          }
+          if (res?.action === 'updated') {
+            alert('Plan updated to ' + (res.tier || tier));
+            return;
+          }
+          if (res?.action === 'unchanged') {
+            alert('Plan unchanged (' + (res.tier || tier) + ')');
+            return;
+          }
+          if (res?.checkoutUrl?.startsWith('https://checkout.stripe.com/')) {
+            window.location.assign(res.checkoutUrl);
           }
         },
-        // Present but empty on purpose. The USER_ACTION context is what makes the
-        // refusal visible; the old `error: () => undefined` looked identical but
-        // carried no policy, so nothing was ever reported. See keys.service.ts.
         error: () => undefined,
       });
   }

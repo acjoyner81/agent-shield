@@ -96,7 +96,28 @@ app = FastAPI(
     dependencies=[Depends(verify_rate_limit)],
     openapi_url="/openapi.json",
     docs_url="/docs",
+    swagger_ui_parameters={"url": "/api/openapi.json"},
+    servers=[{"url": "/api"}, {"url": "/"}],
 )
+
+
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import JSONResponse
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+async def api_openapi_json():
+    return JSONResponse(content=app.openapi())
+
+
+@app.get("/api/docs", include_in_schema=False)
+async def api_docs_ui():
+    return get_swagger_ui_html(
+        openapi_url="/api/openapi.json",
+        title=f"{app.title} - Swagger UI",
+        swagger_ui_parameters=app.swagger_ui_parameters or {"url": "/api/openapi.json"},
+    )
+
 
 # One request.completed event per served request, attributed to the tenant the
 # auth dependencies resolved. Registered here rather than on a route so a route

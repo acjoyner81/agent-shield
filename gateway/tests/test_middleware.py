@@ -29,7 +29,10 @@ def build_app() -> TestClient:
     async def chat(request: Request):
         request.state.tenant_id = "tenant_alpha"
         request.state.user_id = "usr_999"
-        return {"status": "success"}
+        return {
+            "status": "success",
+            "traceparent": request.headers.get("traceparent"),
+        }
 
     @app.post("/v1/completions")
     async def completions(request: Request):
@@ -75,8 +78,40 @@ def test_emits_request_completed_from_principal_state(request_completed):
     assert kwargs["path"] == "/v1/chat"
     assert kwargs["status_code"] == 200
     assert kwargs["trace_id"] == "a" * 32
-    assert kwargs["span_id"] == "a" * 16
+    assert kwargs["span_id"] == "b" * 16
     assert kwargs["latency_ms"] >= 0
+
+
+def test_missing_traceparent_is_generated_and_propagated(request_completed):
+    response = build_app().get("/v1/chat")
+
+    assert response.status_code == 200
+    traceparent = response.json()["traceparent"]
+    assert traceparent is not None
+    version, trace_id, span_id, flags = traceparent.split("-")
+    assert version == "00"
+    assert len(trace_id) == 32 and trace_id != "0" * 32
+    assert len(span_id) == 16 and span_id != "0" * 16
+    assert flags == "01"
+    kwargs = request_completed.call_args.kwargs
+    assert kwargs["trace_id"] == trace_id
+    assert kwargs["span_id"] == span_id
+
+
+def test_invalid_traceparent_is_replaced(request_completed):
+    response = build_app().get(
+        "/v1/chat",
+        headers={"traceparent": "not-a-valid-traceparent"},
+    )
+
+    assert response.status_code == 200
+    traceparent = response.json()["traceparent"]
+    assert traceparent is not None
+    assert traceparent != "not-a-valid-traceparent"
+    _, trace_id, span_id, _ = traceparent.split("-")
+    kwargs = request_completed.call_args.kwargs
+    assert kwargs["trace_id"] == trace_id
+    assert kwargs["span_id"] == span_id
 
 
 def test_spoofed_tenant_header_is_ignored(request_completed):

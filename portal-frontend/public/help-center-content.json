@@ -59,14 +59,21 @@
           "title": "Get started with AgentShield",
           "heading": "Make your first request",
           "summary": "",
-          "body": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).\n\nFor the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:\n\n```bash\ncurl -X POST http://localhost:8000/v1/meta/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'\n```\n\nThe gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
+          "body": "Create a key on [API keys & access](/keys) and keep it in a secret manager. Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).\n\nYou can try a live request in the interactive [API console](/api/docs). Use the `apiKey` (X-Tenant-API-Key) Authorize box with a least privilege tenant key you created on [API keys & access](/keys). The console is schema driven and exposes the whole published contract, so only paste keys you intend to use there.\n\nUse the guarded chat completion route:\n\n```bash\ncurl -X POST http://localhost:8000/v1/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'\n```\n\n`model` defaults to `gpt-4o`. You may use `prompt` instead of `messages`. In the current environment this route returns a gateway stub response, not a live provider call unless Meta routing is configured separately.\n\n> **Gateway configuration for Meta models:** For the hosted Meta model, set the gateway's `BASETEN_API_KEY`; `META_API_BASE_URL` is an optional endpoint override. Neither setting is needed for the console above.\n\nThe gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never embed the gateway's provider secret (`BASETEN_API_KEY`) or ship provider base URLs in browser code. Your own tenant key typed into this gateway's console is not forbidden, but never commit or ship it. This console link is supported for local Docker Compose only and loads Swagger UI assets from a CDN.",
           "blocks": [
             {
               "type": "paragraph",
-              "text": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).",
+              "text": "Create a key on [API keys & access](/keys) and keep it in a secret manager. Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).",
               "parts": [
                 {
-                  "text": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in "
+                  "text": "Create a key on "
+                },
+                {
+                  "text": "API keys & access",
+                  "url": "/keys"
+                },
+                {
+                  "text": " and keep it in a secret manager. Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in "
                 },
                 {
                   "text": "Models & routing",
@@ -79,23 +86,64 @@
             },
             {
               "type": "paragraph",
-              "text": "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:",
+              "text": "You can try a live request in the interactive [API console](/api/docs). Use the `apiKey` (X-Tenant-API-Key) Authorize box with a least privilege tenant key you created on [API keys & access](/keys). The console is schema driven and exposes the whole published contract, so only paste keys you intend to use there.",
               "parts": [
                 {
-                  "text": "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:"
+                  "text": "You can try a live request in the interactive "
+                },
+                {
+                  "text": "API console",
+                  "url": "/api/docs"
+                },
+                {
+                  "text": ". Use the `apiKey` (X-Tenant-API-Key) Authorize box with a least privilege tenant key you created on "
+                },
+                {
+                  "text": "API keys & access",
+                  "url": "/keys"
+                },
+                {
+                  "text": ". The console is schema driven and exposes the whole published contract, so only paste keys you intend to use there."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "text": "Use the guarded chat completion route:",
+              "parts": [
+                {
+                  "text": "Use the guarded chat completion route:"
                 }
               ]
             },
             {
               "type": "code",
-              "text": "curl -X POST http://localhost:8000/v1/meta/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'"
+              "text": "curl -X POST http://localhost:8000/v1/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'"
             },
             {
               "type": "paragraph",
-              "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
+              "text": "`model` defaults to `gpt-4o`. You may use `prompt` instead of `messages`. In the current environment this route returns a gateway stub response, not a live provider call unless Meta routing is configured separately.",
               "parts": [
                 {
-                  "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client."
+                  "text": "`model` defaults to `gpt-4o`. You may use `prompt` instead of `messages`. In the current environment this route returns a gateway stub response, not a live provider call unless Meta routing is configured separately."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "text": "> **Gateway configuration for Meta models:** For the hosted Meta model, set the gateway's `BASETEN_API_KEY`; `META_API_BASE_URL` is an optional endpoint override. Neither setting is needed for the console above.",
+              "parts": [
+                {
+                  "text": "> **Gateway configuration for Meta models:** For the hosted Meta model, set the gateway's `BASETEN_API_KEY`; `META_API_BASE_URL` is an optional endpoint override. Neither setting is needed for the console above."
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never embed the gateway's provider secret (`BASETEN_API_KEY`) or ship provider base URLs in browser code. Your own tenant key typed into this gateway's console is not forbidden, but never commit or ship it. This console link is supported for local Docker Compose only and loads Swagger UI assets from a CDN.",
+              "parts": [
+                {
+                  "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never embed the gateway's provider secret (`BASETEN_API_KEY`) or ship provider base URLs in browser code. Your own tenant key typed into this gateway's console is not forbidden, but never commit or ship it. This console link is supported for local Docker Compose only and loads Swagger UI assets from a CDN."
                 }
               ]
             }
@@ -142,7 +190,7 @@
           "title": "Get started with AgentShield",
           "heading": "Troubleshooting",
           "summary": "",
-          "body": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.\n\nFor API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment.",
+          "body": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.",
           "blocks": [
             {
               "type": "paragraph",
@@ -157,15 +205,6 @@
                 },
                 {
                   "text": " page."
-                }
-              ]
-            },
-            {
-              "type": "paragraph",
-              "text": "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment.",
-              "parts": [
-                {
-                  "text": "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment."
                 }
               ]
             }
@@ -229,14 +268,21 @@
       "title": "Get started with AgentShield",
       "heading": "Make your first request",
       "summary": "",
-      "body": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).\n\nFor the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:\n\n```bash\ncurl -X POST http://localhost:8000/v1/meta/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'\n```\n\nThe gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
+      "body": "Create a key on [API keys & access](/keys) and keep it in a secret manager. Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).\n\nYou can try a live request in the interactive [API console](/api/docs). Use the `apiKey` (X-Tenant-API-Key) Authorize box with a least privilege tenant key you created on [API keys & access](/keys). The console is schema driven and exposes the whole published contract, so only paste keys you intend to use there.\n\nUse the guarded chat completion route:\n\n```bash\ncurl -X POST http://localhost:8000/v1/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'\n```\n\n`model` defaults to `gpt-4o`. You may use `prompt` instead of `messages`. In the current environment this route returns a gateway stub response, not a live provider call unless Meta routing is configured separately.\n\n> **Gateway configuration for Meta models:** For the hosted Meta model, set the gateway's `BASETEN_API_KEY`; `META_API_BASE_URL` is an optional endpoint override. Neither setting is needed for the console above.\n\nThe gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never embed the gateway's provider secret (`BASETEN_API_KEY`) or ship provider base URLs in browser code. Your own tenant key typed into this gateway's console is not forbidden, but never commit or ship it. This console link is supported for local Docker Compose only and loads Swagger UI assets from a CDN.",
       "blocks": [
         {
           "type": "paragraph",
-          "text": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).",
+          "text": "Create a key on [API keys & access](/keys) and keep it in a secret manager. Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in [Models & routing](/models).",
           "parts": [
             {
-              "text": "Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in "
+              "text": "Create a key on "
+            },
+            {
+              "text": "API keys & access",
+              "url": "/keys"
+            },
+            {
+              "text": " and keep it in a secret manager. Send requests through the gateway using a tenant key in the `X-Tenant-API-Key` header. Use a model configured for your workspace; model names and providers are managed in "
             },
             {
               "text": "Models & routing",
@@ -249,23 +295,64 @@
         },
         {
           "type": "paragraph",
-          "text": "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:",
+          "text": "You can try a live request in the interactive [API console](/api/docs). Use the `apiKey` (X-Tenant-API-Key) Authorize box with a least privilege tenant key you created on [API keys & access](/keys). The console is schema driven and exposes the whole published contract, so only paste keys you intend to use there.",
           "parts": [
             {
-              "text": "For the Meta model hosted through Baseten, configure `META_API_BASE_URL` and `BASETEN_API_KEY` for the gateway. The request uses the OpenAI-compatible chat completion shape:"
+              "text": "You can try a live request in the interactive "
+            },
+            {
+              "text": "API console",
+              "url": "/api/docs"
+            },
+            {
+              "text": ". Use the `apiKey` (X-Tenant-API-Key) Authorize box with a least privilege tenant key you created on "
+            },
+            {
+              "text": "API keys & access",
+              "url": "/keys"
+            },
+            {
+              "text": ". The console is schema driven and exposes the whole published contract, so only paste keys you intend to use there."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Use the guarded chat completion route:",
+          "parts": [
+            {
+              "text": "Use the guarded chat completion route:"
             }
           ]
         },
         {
           "type": "code",
-          "text": "curl -X POST http://localhost:8000/v1/meta/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"<CONFIGURED_META_MODEL>\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'"
+          "text": "curl -X POST http://localhost:8000/v1/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Tenant-API-Key: <YOUR_TENANT_API_KEY>' \\\n  -d '{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'"
         },
         {
           "type": "paragraph",
-          "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client.",
+          "text": "`model` defaults to `gpt-4o`. You may use `prompt` instead of `messages`. In the current environment this route returns a gateway stub response, not a live provider call unless Meta routing is configured separately.",
           "parts": [
             {
-              "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never put provider credentials in browser code or send them from a client."
+              "text": "`model` defaults to `gpt-4o`. You may use `prompt` instead of `messages`. In the current environment this route returns a gateway stub response, not a live provider call unless Meta routing is configured separately."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "> **Gateway configuration for Meta models:** For the hosted Meta model, set the gateway's `BASETEN_API_KEY`; `META_API_BASE_URL` is an optional endpoint override. Neither setting is needed for the console above.",
+          "parts": [
+            {
+              "text": "> **Gateway configuration for Meta models:** For the hosted Meta model, set the gateway's `BASETEN_API_KEY`; `META_API_BASE_URL` is an optional endpoint override. Neither setting is needed for the console above."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never embed the gateway's provider secret (`BASETEN_API_KEY`) or ship provider base URLs in browser code. Your own tenant key typed into this gateway's console is not forbidden, but never commit or ship it. This console link is supported for local Docker Compose only and loads Swagger UI assets from a CDN.",
+          "parts": [
+            {
+              "text": "The gateway authenticates the tenant, applies configured ingress guardrails, and forwards eligible requests to the configured provider. Never embed the gateway's provider secret (`BASETEN_API_KEY`) or ship provider base URLs in browser code. Your own tenant key typed into this gateway's console is not forbidden, but never commit or ship it. This console link is supported for local Docker Compose only and loads Swagger UI assets from a CDN."
             }
           ]
         }
@@ -312,7 +399,7 @@
       "title": "Get started with AgentShield",
       "heading": "Troubleshooting",
       "summary": "",
-      "body": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.\n\nFor API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment.",
+      "body": "An authentication error usually means the key is missing, invalid, revoked, or sent in the wrong header. A permission error means the signed-in principal does not hold the required permission. A degraded service means a dependency probe failed or became stale; review its reported detail and the [Observability](/logs) page.",
       "blocks": [
         {
           "type": "paragraph",
@@ -327,15 +414,6 @@
             },
             {
               "text": " page."
-            }
-          ]
-        },
-        {
-          "type": "paragraph",
-          "text": "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment.",
-          "parts": [
-            {
-              "text": "For API request and response schemas, use the gateway's API documentation at `/api/docs` in a running local deployment."
             }
           ]
         }
@@ -452,7 +530,7 @@
       "section_id": "api-keys"
     },
     {
-      "question": "How do I make my first Meta model request?",
+      "question": "How do I make my first request?",
       "section_id": "first-request"
     },
     {

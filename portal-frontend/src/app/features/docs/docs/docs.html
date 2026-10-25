@@ -15,9 +15,9 @@
     @for (section of document.sections; track section.section_id) {
       <section class="docs-section" [id]="section.section_id"><h3><a [href]="'#' + section.section_id">{{ section.heading }}</a></h3>
         @for (block of section.blocks; track $index) {
-          @if (block.type === 'paragraph') {<p>@for (part of block.parts ?? []; track $index) {@if (part.url?.startsWith('/')) {<a [routerLink]="part.url">{{ part.text }}</a>} @else {{{ part.text }}}}</p>}
+          @if (block.type === 'paragraph') {<p>@for (part of block.parts ?? []; track $index) {@if (part.url?.startsWith('/api/')) {<a [href]="part.url">{{ part.text }}</a>} @else if (part.url?.startsWith('/')) {<a [routerLink]="part.url">{{ part.text }}</a>} @else {{{ part.text }}}}</p>}
           @if (block.type === 'code') {<pre><code>{{ block.text }}</code></pre>}
-          @if (block.type === 'list') {<ul>@for (item of block.items ?? []; track $index) {<li>{{ item }}</li>}</ul>}
+          @if (block.type === 'list') {<ul>@for (item of block.items ?? []; track $index) {<li>@for (part of renderListItem(item); track $index) {@if (part.type === 'apiLink') {<a [href]="part.url">{{ part.text }}</a>} @else if (part.type === 'routerLink') {<a [routerLink]="part.url">{{ part.text }}</a>} @else {{{ part.text }}}}</li>}</ul>}
         }
       </section>
     }

@@ -5,6 +5,11 @@ does not need this file.
 
 ## Context
 
+**Update 2026-10-23**: The original delivery defect described below is resolved, and
+Splunk is receiving events. The engineer's current Splunk result showed a completed
+request event carrying a stable `user_id`. This amendment addresses that identifier's
+exposure; it does not reopen the transport or event producer decisions.
+
 No telemetry has ever reached Splunk. This is not an outage that started recently; it is a
 pipeline that has never once completed a delivery, and nothing in the system said so.
 
@@ -37,6 +42,10 @@ The evidence, gathered by probing the running stack:
   configuration.
 - `scrub_pii` is defined at `gateway/aggregator.py:35` and never called. The personal data
   masking that spec 0001 requires has never run on anything.
+- The event envelope carries the authenticated user's stable subject, or a machine key
+  identifier, as `user_id`. The value is not a direct name or email, but it can link
+  events to the same principal and is currently included in the payload sent to a
+  separate log platform.
 
 Two things in the repository state this plainly. The `splunk` service is not handed the
 collector token at all; only `telemetry-aggregator` gets the Splunk environment. And
@@ -133,6 +142,29 @@ flag whose purpose is to disable a protection will be set to false by someone in
 and left there, and this project has already had a security control quietly fail open (the
 `permissions` claim collision, where an advisory check called a broken control harmless).
 
+### Sub decision: pseudonymizing `user_id` before Splunk
+
+**Tenant scoped HMAC-SHA256 with a dedicated secret (chosen)**. It produces a stable
+pseudonym for correlating events within one tenant while keeping the source identifier
+out of Splunk. Including the tenant identifier in the HMAC input prevents the same
+principal value from correlating across tenants. The secret makes offline guessing harder
+than an unkeyed digest, and the transformation happens at the existing shipping
+boundary. The project already treats the event envelope as internal telemetry, while the
+principal identifier is stable and linkable; minimization at the external boundary
+addresses that risk without changing internal event producers (basis: spec 0008,
+`gateway/auth.py`, `gateway/aggregator.py`, keyed pseudonymization, data minimization).
+
+**Keep the raw identifier in Splunk**. This preserves current searches and gives the
+strongest direct correlation to account records. Rejected because the stable account
+subject would be exported to a separate log platform even though the aggregator can
+correlate events without it (basis: spec 0008 and the existing telemetry scrubber in
+`gateway/aggregator.py`).
+
+**Use an unkeyed SHA-256 digest**. This is deterministic and needs no secret configuration.
+Rejected because a digest does not prevent guessing candidate identifiers and comparing
+their hashes; the additional key handling is justified for a persistent account
+identifier (basis: keyed pseudonymization and data minimization).
+
 ## Rationale
 
 Option 1 is chosen because the defining constraint is that this pipeline has never
@@ -162,6 +194,21 @@ writing second stranded a metered event so that its dead letter entry redrived a
 duplicate and the usage was dropped permanently. `gateway/metering.py` now uses one script
 for claim and rollup for this reason, and reusing that pattern here costs one script and
 removes a whole class of loss.
+
+The `user_id` amendment applies a transform only at the boundary that exports telemetry.
+The event producer and internal queue keep their existing contract, while the Splunk
+request and dead letter copy carry the keyed pseudonym. A deterministic HMAC keeps
+cross-event correlation useful within a tenant, and the tenant identifier in the HMAC
+input prevents the same principal value from correlating across tenants. The
+domain-separated message begins with `agentshield-splunk-user-id:v1`, so this use remains
+distinct from any later HMAC use of the same key. The required secret prevents a reader
+of Splunk data from checking guesses without access to that secret. This does not make
+the result anonymous: the pseudonym remains linkable within a tenant, and changing the
+key creates a separate correlation namespace. The key must therefore be managed as a
+stable deployment secret, and an image without the transform must not be enabled for
+shipping after this change. A malformed identifier is isolated to its own dead letter
+entry, so one bad event cannot block valid events in the same batch (basis: spec 0008,
+`gateway/auth.py`, `gateway/aggregator.py`, keyed pseudonymization, data minimization).
 
 ## Evidence
 
@@ -197,9 +244,16 @@ take this on trust.
   contract, which is what allows its response to change here.
 - `gateway/metering.py`: the atomic Lua script for claim and rollup, the precedent for the
   replay script.
+- `gateway/auth.py`: the verified user subject or machine key identifier currently used as
+  the event `user_id`.
+- `gateway/aggregator.py`: the outbound scrub and dead letter paths where the transform
+  must run before any collector request.
+- `gateway/telemetry.py`: the portal history projection, which does not include
+  `user_id`.
 
 **Practices & standards**:
 - Strangler pattern, for migrating a live path onto a replacement without a cutover risk.
 - Health checks that assert the real dependency rather than process liveness.
 - Atomic replay of a dead letter queue, so an entry is never in neither destination.
 - Secrets in the environment rather than in configuration files, and never in logs.
+- Keyed pseudonymization and data minimization at an external logging boundary.

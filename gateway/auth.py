@@ -171,12 +171,23 @@ async def get_verified_tenant(
 
 
 def _trace_ids(request: Request) -> tuple[str, str]:
+    trace_id = getattr(request.state, "trace_id", None)
+    span_id = getattr(request.state, "span_id", None)
+    if trace_id and span_id:
+        return str(trace_id), str(span_id)
+
     traceparent = request.headers.get("traceparent")
-    if traceparent and "-" in traceparent:
-        trace_id = traceparent.split("-")[1]
-    else:
-        trace_id = "unknown"
-    return trace_id, trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown"
+    parts = (traceparent or "").split("-")
+    if (
+        len(parts) == 4
+        and parts[0] == "00"
+        and len(parts[1]) == 32
+        and len(parts[2]) == 16
+        and parts[1] != "0" * 32
+        and parts[2] != "0" * 16
+    ):
+        return parts[1], parts[2]
+    return "unknown", "unknown"
 
 
 async def verify_api_key(
@@ -304,14 +315,9 @@ def _assert_permission(request: Request, required_scope: str, tenant_id: str) ->
     if required_scope in permissions:
         return
 
-    traceparent = request.headers.get("traceparent")
-    if traceparent and "-" in traceparent:
-        trace_id = traceparent.split("-")[1]
-    else:
-        trace_id = "unknown"
+    trace_id, span_id = _trace_ids(request)
 
     user_id = getattr(request.state, "user_id", "unknown")
-    span_id = trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown"
 
     # Synchronous direct call (removed asyncio.create_task and removed duplicate call)
     emit_authz_failure(

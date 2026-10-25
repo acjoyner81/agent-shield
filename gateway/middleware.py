@@ -1,5 +1,7 @@
+import re
 import time
 from typing import Callable, Iterable, Optional
+from uuid import uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -30,6 +32,11 @@ DEFAULT_EXCLUDED_PREFIXES = (
     "/api/v1/telemetry",
 )
 
+_TRACEPARENT = re.compile(
+    r"00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})",
+    re.IGNORECASE,
+)
+
 
 class TelemetryMiddleware(BaseHTTPMiddleware):
     """Emit one ``agentshield.telemetry.request.completed`` per served request.
@@ -50,6 +57,7 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
         self.excluded_prefixes = tuple(excluded_prefixes)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        trace_id, span_id = _trace_ids(request)
         start = time.perf_counter()
         status_code = 500
         try:
@@ -58,10 +66,22 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
             return response
         finally:
             if not request.url.path.startswith(self.excluded_prefixes):
-                self._emit(request, status_code, (time.perf_counter() - start) * 1000)
+                self._emit(
+                    request,
+                    status_code,
+                    (time.perf_counter() - start) * 1000,
+                    trace_id,
+                    span_id,
+                )
 
-    def _emit(self, request: Request, status_code: int, latency_ms: float) -> None:
-        trace_id, span_id = _trace_ids(request)
+    def _emit(
+        self,
+        request: Request,
+        status_code: int,
+        latency_ms: float,
+        trace_id: str,
+        span_id: str,
+    ) -> None:
         try:
             emit_request_completed(
                 tenant_id=getattr(request.state, "tenant_id", None) or "unknown",
@@ -79,13 +99,26 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
 
 
 def _trace_ids(request: Request) -> tuple[str, str]:
-    """The W3C traceparent the request carried, mirroring gateway.auth."""
+    """Use a valid W3C traceparent or create one for downstream calls."""
     traceparent = request.headers.get("traceparent")
-    if traceparent and "-" in traceparent:
-        trace_id = traceparent.split("-")[1]
+    match = _TRACEPARENT.fullmatch(traceparent or "")
+    if match and match.group(1) != "0" * 32 and match.group(2) != "0" * 16:
+        trace_id, span_id, flags = (part.lower() for part in match.groups())
+        traceparent = f"00-{trace_id}-{span_id}-{flags}"
     else:
-        trace_id = "unknown"
-    span_id = trace_id[:16] if trace_id and len(trace_id) >= 16 else "unknown"
+        trace_id = uuid4().hex
+        span_id = uuid4().hex[:16]
+        traceparent = f"00-{trace_id}-{span_id}-01"
+
+    if request.headers.get("traceparent") != traceparent:
+        request.scope["headers"] = [
+            (name, value)
+            for name, value in request.scope["headers"]
+            if name.lower() != b"traceparent"
+        ] + [(b"traceparent", traceparent.encode("ascii"))]
+
+    request.state.trace_id = trace_id
+    request.state.span_id = span_id
     return trace_id, span_id
 
 

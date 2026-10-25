@@ -17,10 +17,8 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
-
-from fastapi import Request
 
 from gateway.auth import (
     get_verified_tenant,
@@ -128,7 +126,7 @@ def _stub_rate_limit():
 
 @pytest.fixture(autouse=True)
 def _stub_telemetry():
-    with patch("gateway.main.emit_request_completed") as req, patch(
+    with patch("gateway.middleware.emit_request_completed") as req, patch(
         "gateway.auth.emit_authz_failure"
     ) as authz:
         req.return_value = ""
@@ -173,13 +171,16 @@ def test_rbac_execute_tool_forbidden(_stub_telemetry):
     assert response.json() == {"detail": UNAUTHORIZED_DETAIL}
 
     # AC-4: failure recorded with user_id, tenant_id, required_permission.
-    _stub_telemetry["authz"].assert_called_once_with(
-        tenant_id="tenant_alpha",
-        user_id="user_dev_456",
-        trace_id="unknown",
-        span_id="unknown",
-        missing_scope=REQUIRED_SCOPE,
-    )
+    _stub_telemetry["authz"].assert_called_once()
+    authz_kwargs = _stub_telemetry["authz"].call_args.kwargs
+    request_kwargs = _stub_telemetry["request_completed"].call_args.kwargs
+    assert authz_kwargs["tenant_id"] == "tenant_alpha"
+    assert authz_kwargs["user_id"] == "user_dev_456"
+    assert authz_kwargs["missing_scope"] == REQUIRED_SCOPE
+    assert len(authz_kwargs["trace_id"]) == 32
+    assert len(authz_kwargs["span_id"]) == 16
+    assert authz_kwargs["trace_id"] == request_kwargs["trace_id"]
+    assert authz_kwargs["span_id"] == request_kwargs["span_id"]
 
 
 def test_authz_failure_event_records_required_permission(_stub_telemetry):
@@ -427,10 +428,13 @@ def test_machine_key_without_scope_denied_and_store_tenant_wins(_stub_telemetry)
     assert response.status_code == 403
     assert response.json() == {"detail": UNAUTHORIZED_DETAIL}
 
-    _stub_telemetry["authz"].assert_called_once_with(
-        tenant_id="tenant_rbac",
-        user_id="key_machine_1",
-        trace_id="unknown",
-        span_id="unknown",
-        missing_scope=REQUIRED_SCOPE,
-    )
+    _stub_telemetry["authz"].assert_called_once()
+    authz_kwargs = _stub_telemetry["authz"].call_args.kwargs
+    request_kwargs = _stub_telemetry["request_completed"].call_args.kwargs
+    assert authz_kwargs["tenant_id"] == "tenant_rbac"
+    assert authz_kwargs["user_id"] == "key_machine_1"
+    assert authz_kwargs["missing_scope"] == REQUIRED_SCOPE
+    assert len(authz_kwargs["trace_id"]) == 32
+    assert len(authz_kwargs["span_id"]) == 16
+    assert authz_kwargs["trace_id"] == request_kwargs["trace_id"]
+    assert authz_kwargs["span_id"] == request_kwargs["span_id"]

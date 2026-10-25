@@ -34,6 +34,9 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 20 | Portal Help Center | Slice 4 | in-progress |
 | 21 | Documentation Assistant | Slice 4 | in-progress |
 | 22 | Help Center Interactive Console | Slice 4 | in-progress |
+| 23 | Observability Tenant Filter | Slice 4 | planned |
+| 24 | Meta Model Cost Reporting | Slice 4 | planned |
+| 25 | Meta Hackathon E2E Demo | Slice 4 | in-progress |
 
 ## Foundations
 
@@ -78,8 +81,8 @@ Wire the full path from Angular Portal through the Gateway to the MCP Server and
 Spec 0003 · code in `gateway/main.py` and `java-services/mcp-server/`
 
 ### 13. Land Telemetry in Splunk · done
-Make events actually arrive in Splunk, make the setup reproducible from the repo, and surface a broken pipeline on the health page instead of letting it hide.
-**Done when:** a fresh `docker compose up` ships telemetry into a searchable Splunk index with no hand edit, Splunk reports healthy on `/v1/health/services`, and the stranded events can be replayed to zero.
+Make events arrive in Splunk, keep the setup reproducible from the repo, surface a broken pipeline on the health page, and protect stable user identifiers at the Splunk boundary.
+**Done when:** a fresh `docker compose up` ships telemetry into a searchable Splunk index with no hand edit, Splunk reports healthy on `/v1/health/services`, stranded events can be replayed to zero, and Splunk receives only tenant scoped user pseudonyms.
 - [x] Design it (spec): `/architect land telemetry in splunk` → Spec 0014
 - [x] Build it: `/develop land telemetry in splunk`
    - [x] Persist Splunk config and data, enable the collector from a repo owned file, publish its CA (AC-3, AC-4, AC-2)
@@ -87,8 +90,10 @@ Make events actually arrive in Splunk, make the setup reproducible from the repo
    - [x] Collapse to one shipping path, read the collector response body, scrub personal data (AC-5, AC-12, AC-6)
    - [x] Cap the dead letter queue and count drops in one atomic script on a single push end (AC-8, AC-10)
    - [x] Add the health entry, the `telemetry:admin` scope, atomic redrive, and drain the stranded events (AC-7, AC-8, AC-9)
-- [x] Verify it: `/check verify land telemetry in splunk` — run 2026-10-07, verdict FAIL at 10 of 12; both findings closed the same day (AC-7 fixed and proven live past the idle window, AC-10 interruption tests restored in `test_telemetry_landing.py`), evidence and method in `docs/reviews/2026-10-07-telemetry-verify.md`, spec AC-2/AC-7 text amended.
-- [x] Test it: `/test land telemetry in splunk` — 9 tests added 2026-10-07: AC-10 replay boundaries (happy, limit, interrupted before and after the move) and the redrive gate (403 scope, 401 missing token) in `gateway/tests/test_telemetry_landing.py`, AC-12 collector verdict chain (ShipRejected dead letters instead of acking, code 0 ships clean) in `gateway/tests/test_aggregator.py`.
+   - [x] Add strict Base64 key validation for the required HMAC secret (AC-13)
+   - [x] Pseudonymize the outbound `user_id` per tenant and cover the queue, Splunk, and dead letter boundaries (AC-13)
+- [x] Verify it: `/check verify land telemetry in splunk`. Runtime check on 2026-10-23 confirmed a synthetic event reached `index=main` with a pseudonym and no source identifier. The Redis stream retained the original event, and the aggregator stayed healthy.
+- [x] Test it: `/test land telemetry in splunk`. Run on 2026-10-23, all 16 focused aggregator tests passed, including AC-13 coverage in `gateway/tests/test_aggregator.py`.
 Spec 0014 · `docs/specs/0014-land-telemetry-in-splunk/index.md` · code in `docker-compose.yml`, `gateway/aggregator.py`, `gateway/main.py`, `gateway/metering.py`
 
 ## Slice 2: Identity & Access
@@ -135,16 +140,20 @@ Assign an explicit required permission to every `/v1/*` route, so access control
 ## Slice 3: Billing & Monetization
 
 ### 6. Hybrid Stripe Integration · in-progress · GA
-Implement a base monthly subscription combined with metered billing for tokens and tool calls.
-**Done when:** Stripe successfully charges the base fee and tracks metered usage for a tenant.
+Implement base monthly subscriptions and safe plan changes. Metered usage reporting stays in feature 17.
+**Done when:** a tenant can start or change one base subscription, and verified Stripe events keep its Redis entitlement current.
 - [x] Design it (spec): `/architect hybrid stripe integration`
-- [x] Build it: `/develop hybrid stripe integration`
-   - [x] Configuration & entitlement helper module
-   - [x] Implement /v1/billing/checkout & /v1/billing/portal endpoints
-   - [x] Implement /v1/billing/webhook endpoint with signature verification
-- [x] Verify it: `/check verify hybrid stripe integration`
-- [x] Test it: `/test hybrid stripe integration` — no uncommitted billing code to test (the suite landed 2026-09-28). Ran and traced the existing `gateway/tests/test_billing.py` to spec 0007: 26 passed, now tagged AC-1 (`test_stripe_sdk_is_configured_from_settings`), AC-2 (`TestCacheEntitlement`, `TestGetCachedEntitlement`), AC-3 (`test_checkout_creates_session`, `TestEnsureStripeCustomer`, `TestCheckoutEdgeCases`), AC-4 (`test_portal_returns_url`, `test_portal_no_customer_returns_404`), AC-5 (`TestWebhookSecurityCases`, `TestWebhookPaymentSecurity`, subscription created/deleted). Spec 0007 Follow-up (push metered usage to Stripe) stays open.
-Spec 0007 · `docs/specs/0007-stripe-integration/index.md` · code in `gateway/billing.py`
+- [ ] Build it: `/develop hybrid stripe integration`
+   - [x] Configure Stripe and add entitlement helpers (AC-1, AC-2)
+   - [x] Implement checkout, portal, and signed webhook endpoints (AC-3, AC-4, AC-5)
+   - [ ] Recover customer links and safely change the recognized plan item (AC-8, AC-9, AC-10, AC-11)
+   - [ ] Show clear outcomes for checkout, plan changes, no-op selections, and errors (AC-9, AC-10)
+   - [ ] Verify checkout, webhooks, portal access, and plan changes in test mode (AC-6, AC-7, AC-8, AC-9, AC-11)
+- [ ] Verify it: `/check verify hybrid stripe integration` (rerun after the test mode changes)
+- [ ] Test it: `/test hybrid stripe integration` (rerun after the test mode changes; the previous mocked suite had 26 passing tests for AC-1 through AC-5)
+- [ ] Review it (fresh model): `/check review hybrid stripe integration`
+- [ ] Document it: `/document hybrid stripe integration`
+Spec 0007 · [`index.md`](../specs/0007-stripe-integration/index.md) · code in `gateway/billing.py`
 
 ### 7. Tenant Rate Limiting · done
 Enforce token bucket rate limits in Redis across all `/v1/*` routes per tenant.
@@ -294,6 +303,29 @@ Make the Help Center "Make your first request" section usable: teach the guarded
 - [ ] Verify it: `/check verify help center interactive console`
 - [ ] Test it: `/test help center interactive console`
 Spec 0018 · [`docs/specs/0018-help-center-interactive-console.md`](../specs/0018-help-center-interactive-console.md)
+
+### 23. Observability Tenant Filter · planned · needs a decision
+Make the tenant selector on the Observability page useful while preserving the rule that users only see events their principal is allowed to access.
+**Done when:** selecting an authorized tenant updates the event rows, and a user cannot view or infer events for an unauthorized tenant.
+- [ ] Design it (spec): `/architect observability tenant filter`
+
+### 24. Meta Model Cost Reporting · planned · needs a decision
+Carry validated Meta model token usage into cost reporting so Observability and usage views can show a meaningful estimate when the caller is allowed to see it.
+**Done when:** complete token counts and a verified model price produce the expected cost for authorized users, while missing usage, unknown prices, or insufficient permission never appear as `$0`.
+- [ ] Design it (spec): `/architect meta model cost reporting`
+
+### 25. Meta Hackathon E2E Demo · in-progress
+Use the Enterprise Agent Engine's local synthetic RAG flow to show an agent model request protected by AgentShield and observable in Splunk.
+**Done when:** the `ACC-9021` RAG request passes through AgentShield, fails closed without a direct or mock fallback, and its security events contain no prompt or account content.
+- [x] Design it (spec): `/architect meta hackathon demo` → Spec 0019
+- [ ] Build it: `/develop meta hackathon demo`
+  - [ ] Route only `VECTORLESS_RAG` model requests through AgentShield, parse its response envelope, and fail closed (AC-1, AC-2, AC-10)
+  - [ ] Preserve unknown model cost as unavailable and verify PII redaction and content free events in Splunk (AC-3, AC-4, AC-8)
+  - [ ] Keep injection and RBAC denial as separate gateway demonstrations (AC-5, AC-6)
+  - [ ] Document setup, expected results, health checks, Splunk searches, and the local synthetic data boundary (AC-7, AC-9)
+- [ ] Verify it: `/check verify meta hackathon demo`
+- [ ] Test it: `/test meta hackathon demo`
+Spec 0019 · [`docs/specs/0019-meta-hackathon-demo/index.md`](../specs/0019-meta-hackathon-demo/index.md) · code in `gateway/routers/meta_models.py`, `../enterprise-agent-engine/src/orchestration/nodes.py`, `../enterprise-agent-engine/src/gateway/litellm_client.py`
 
 ### 19. Java Gateway Core Logic · done · Slice 5
 

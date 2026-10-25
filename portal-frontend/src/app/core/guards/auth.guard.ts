@@ -91,13 +91,16 @@ export const authGuard: CanActivateFn = () => {
       : Promise.resolve(),
   ).pipe(
     mergeMap(() =>
-      from(client.getIdTokenClaims()).pipe(
+      // Ensure the SDK is fully initialized before checking claims.
+      // This prevents the guard from admitting a route while the token
+      // is still being refreshed in the background, which would trigger
+      // a 401 and a subsequent re-auth redirect 1 second later.
+      from(client.getTokenSilently()).pipe(
+        mergeMap(() => from(client.getIdTokenClaims())),
         map((claims) => (claims ? true : signIn())),
+        catchError(() => of(signIn())),
       ),
     ),
-    // A cache read should not reject, but a rejected guard observable cancels
-    // navigation outright and leaves the user on a blank page. An unreadable
-    // cache is still an absent session, so sign in rather than dead-end.
     catchError(() => of(signIn())),
   );
 };

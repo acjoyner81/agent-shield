@@ -1,6 +1,6 @@
 :host { display:block; max-width:920px; margin:0 auto; }
 .assistant-head { align-items:flex-end; }
-.assistant-panel { background:#fff; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+.assistant-panel { background:#fff; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
 .privacy-note { padding:13px 18px; color:#52656e; background:#f1f7f6; border-bottom:1px solid var(--line); font-size:11px; line-height:1.55; }
 .suggestions { padding:22px 24px 10px; }
 .suggestions h2 { margin-bottom:12px; }
