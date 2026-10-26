@@ -105,3 +105,27 @@ def clean_dependency_overrides():
     """A test that overrides a dependency must not leak it into the next test."""
     yield
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def redis_client(fake_redis):
+    """Alias for fake_redis to match test expectations."""
+    return fake_redis
+
+
+@pytest.fixture
+def client(monkeypatch):
+    """Test client fixture."""
+    monkeypatch.setenv("DEV_MODE", "true")
+    monkeypatch.setenv("APP_ENV", "development")
+    from fastapi.testclient import TestClient
+    from gateway.main import app
+    return TestClient(app)
+
+
+@pytest.fixture
+def auth_headers(monkeypatch):
+    """Auth headers for tests using dev mode tokens."""
+    monkeypatch.setenv("DEV_MODE", "true")
+    monkeypatch.setenv("APP_ENV", "development")
+    return {"Authorization": "Bearer dev-mock-token"}

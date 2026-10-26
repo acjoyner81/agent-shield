@@ -1,6 +1,30 @@
 """FastAPI gateway with tenant rate limits, budgets, caching, and audit events."""
 
 import asyncio
+from typing import Annotated, Optional, Any
+import yaml
+
+def resolve_model(tenant_id: str, request_model: Optional[str] = None) -> str:
+    """Resolve the model to use based on the priority chain."""
+    if request_model:
+        return request_model
+
+    # 1. Try tenant default from Redis
+    try:
+        client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+        default = client.hget(f"tenant:{tenant_id}:config", "default_model")
+        if default:
+            return default
+    except Exception:
+        pass
+
+    # 2. Fallback to system default from registry
+    try:
+        with open("gateway/models_registry.yaml", "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            return data["models"][0]["model_id"]
+    except Exception:
+        return "gpt-4o" # Absolute fallback
 import hashlib
 import json
 import logging
@@ -10,7 +34,7 @@ import time
 import uuid
 import httpx
 from contextlib import asynccontextmanager
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Any
 from datetime import datetime, timezone
 
 import redis
@@ -34,6 +58,8 @@ from gateway.webhooks import router as webhook_router
 from gateway.billing import router as billing_router
 from gateway.metering import router as metering_router
 from gateway.keys import router as keys_router
+from gateway.evals import evaluate_response, store_eval_result
+from gateway.routers.models import router as models_router
 from gateway.routers.meta_models import router as meta_models_router
 from gateway.routers.help_assistant import router as help_assistant_router
 from gateway.observability.tripwire_watcher import TripwireDriftWatcher
@@ -96,8 +122,7 @@ app = FastAPI(
     dependencies=[Depends(verify_rate_limit)],
     openapi_url="/openapi.json",
     docs_url="/docs",
-    swagger_ui_parameters={"url": "/api/openapi.json"},
-    servers=[{"url": "/api"}, {"url": "/"}],
+    servers=[{"url": "http://localhost:8000/"}],
 )
 
 
@@ -105,17 +130,17 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse
 
 
-@app.get("/api/openapi.json", include_in_schema=False)
+@app.get("/openapi.json", include_in_schema=False)
 async def api_openapi_json():
     return JSONResponse(content=app.openapi())
 
 
-@app.get("/api/docs", include_in_schema=False)
+@app.get("/docs", include_in_schema=False)
 async def api_docs_ui():
     return get_swagger_ui_html(
-        openapi_url="/api/openapi.json",
+        openapi_url="/openapi.json",
         title=f"{app.title} - Swagger UI",
-        swagger_ui_parameters=app.swagger_ui_parameters or {"url": "/api/openapi.json"},
+        swagger_ui_parameters=app.swagger_ui_parameters or {"url": "/openapi.json"},
     )
 
 
@@ -130,12 +155,14 @@ app.include_router(webhook_router, tags=["webhooks"])
 app.include_router(billing_router)
 app.include_router(metering_router)
 app.include_router(keys_router)
+app.include_router(models_router)
 app.include_router(meta_models_router)  # Meta model API routing
 app.include_router(help_assistant_router)
 # API aliases served to the Angular portal (nginx forwards /api/ unchanged)
 app.include_router(billing_router, prefix="/api")
 app.include_router(metering_router, prefix="/api")
 app.include_router(keys_router, prefix="/api")
+app.include_router(models_router, prefix="/api")
 app.include_router(help_assistant_router, prefix="/api")
 r = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
@@ -159,6 +186,11 @@ class LLMRequest(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
+            "example": {
+                "prompt": "Summarize yesterday's support tickets",
+                "model": "gpt-4o",
+                "temperature": 0.7,
+            },
             "examples": [
                 {
                     "summary": "Simple prompt",
@@ -599,7 +631,27 @@ async def _telemetry_metrics() -> dict[str, int]:
         await client.aclose()
 
 
-# Setup OpenAPI security schemes
+@app.get("/v1/agent/executions", tags=["agent"])
+async def get_agent_executions(
+    tenant_id: Annotated[str, Depends(resolve_active_tenant)],
+) -> list[dict[str, Any]]:
+    """Return currently active agent runs for the authenticated tenant."""
+    run_ids = r.smembers(f"active_runs:{tenant_id}")
+    executions = []
+    for rid in run_ids:
+        data = r.get(f"run:{rid}")
+        if data:
+            executions.append(json.loads(data))
+    return executions
+
+
+@app.get("/v1/evals/recent", tags=["evals"])
+async def get_recent_evals(
+    tenant_id: Annotated[str, Depends(resolve_active_tenant)],
+) -> list[dict[str, Any]]:
+    """Return recent evaluation scores for the authenticated tenant."""
+    evals = r.lrange(f"evals:{tenant_id}", 0, 19)
+    return [json.loads(e) for e in evals]
 app.openapi_schema = None
 
 def custom_openapi():
@@ -615,6 +667,7 @@ def custom_openapi():
         description=app.description,
         routes=app.routes,
     )
+    openapi_schema["servers"] = [{"url": "http://localhost:8000/"}]
 
     excluded_paths = {
         "/health",
@@ -662,6 +715,37 @@ def custom_openapi():
             ),
         }
     }
+    
+    # Ensure HTTPValidationError is properly defined
+    if "HTTPValidationError" not in openapi_schema.get("components", {}).get("schemas", {}):
+        openapi_schema.setdefault("components", {}).setdefault("schemas", {})["HTTPValidationError"] = {
+            "title": "HTTPValidationError",
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "title": "Detail",
+                    "type": "array",
+                    "items": {"$ref": "#/components/schemas/ValidationError"}
+                }
+            },
+            "required": ["detail"]
+        }
+    if "ValidationError" not in openapi_schema.get("components", {}).get("schemas", {}):
+        openapi_schema["components"]["schemas"]["ValidationError"] = {
+            "title": "ValidationError",
+            "type": "object",
+            "required": ["loc", "msg", "type"],
+            "properties": {
+                "loc": {
+                    "title": "Location",
+                    "type": "array",
+                    "items": {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+                },
+                "msg": {"title": "Message", "type": "string"},
+                "type": {"title": "Error Type", "type": "string"},
+                "ctx": {"title": "Context", "type": "object"}
+            }
+        }
     
     # Apply schemes to all remaining routes
     for path_item in openapi_schema["paths"].values():
@@ -894,6 +978,28 @@ async def get_telemetry_logs(
                     "traceId": item.get("trace_id", ""),
                 }
             )
+        try:
+            audit_items = r.lrange("audit_logs", 0, 99)
+            for raw in audit_items:
+                try:
+                    item = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if item.get("tenant_id") == tenant_id:
+                    raw_id = _audit_event_id(item, raw)
+                    history.append({
+                        "eventId": raw_id,
+                        "timestamp": item.get("timestamp", ""),
+                        "tenantId": item.get("tenant_id", ""),
+                        "costUsd": None,
+                        "statusCode": item.get("status_code"),
+                        "latencyMs": item.get("latency_ms"),
+                        "evalPassed": item.get("eval_passed"),
+                        "message": item.get("message", raw),
+                        "traceId": item.get("trace_id", ""),
+                    })
+        except Exception:
+            pass
         return history[-50:]
     except Exception:
         logger.exception("telemetry history read failed for tenant %s", tenant_id)
@@ -1040,6 +1146,10 @@ async def process_llm_request(
         [{"role": "user", "content": payload.prompt}] if payload.prompt else []
     )
     scan_prompt_injection(user_messages)
+    
+    # Resolve the model based on priority chain: Request -> Tenant Default -> System Default
+    effective_model = resolve_model(tenant_id, payload.model)
+    
     effective_prompt = (
         payload.prompt
         or next(
@@ -1048,9 +1158,10 @@ async def process_llm_request(
         )
     )
     tenant_info = verify_rate_limit_and_auth(tenant_id)
-    cache_input = f"{tenant_id}:{payload.model}:{payload.temperature}:{effective_prompt}"
+    cache_input = f"{tenant_id}:{effective_model}:{payload.temperature}:{effective_prompt}"
     cache_key = f"cache:{hashlib.sha256(cache_input.encode()).hexdigest()}"
     cached_response = r.get(cache_key)
+
     if cached_response:
         return {
             "source": "semantic_cache",
@@ -1059,7 +1170,9 @@ async def process_llm_request(
             "response": json.loads(cached_response),
         }
 
-    calculated_cost = 0.003
+    # Estimate cost based on model and mock token usage
+    tokens_used = 150
+    calculated_cost = estimate_cost_usd(effective_model, tokens_used)
     budget_key = f"budget:{tenant_id}:{time.strftime('%Y-%m-%d', time.gmtime())}"
     current_spend = float(r.get(budget_key) or 0.0)
     max_budget = float(tenant_info["daily_budget_usd"])
@@ -1103,15 +1216,67 @@ async def process_llm_request(
             tenant_id=tenant_id,
             input_tokens=0,
             output_tokens=tokens_used,
-            model=payload.model,
+            model=effective_model,
             redis_client=r,
         )
     except Exception as e:
         logger.error(f"Token usage emit failure: {e}")
+
+    # Track as an active run for the portal
+    run_id = str(uuid.uuid4())
+    run_data = {
+        "run_id": run_id,
+        "tenant_id": tenant_id,
+        "status": "active",
+        "start_time": time.time(),
+        "model": effective_model,
+        "prompt": effective_prompt,
+    }
+    r.setex(f"run:{run_id}", 3600, json.dumps(run_data))
+    r.sadd(f"active_runs:{tenant_id}", run_id)
+    
+    # Eval Judge dispatch - evaluate every completed request
+    async def complete_run(rid=run_id, tid=tenant_id):
+        await asyncio.sleep(1)  # Short delay to simulate processing
+        # Mark as completed
+        try:
+            run_raw = r.get(f"run:{rid}")
+            if run_raw:
+                updated_run = json.loads(run_raw)
+                updated_run["status"] = "completed"
+                r.setex(f"run:{rid}", 3600, json.dumps(updated_run))
+            
+            # Evaluate with Eval Judge
+            response_text = mock_llm_response.get("text", "")
+            eval_result = evaluate_response(response_text, effective_prompt, effective_model)
+            eval_data = store_eval_result(r, tid, rid, eval_result)
+            
+            # Also emit eval signal on telemetry for dashboard
+            try:
+                emit_event(
+                    tenant_id=tid,
+                    event_type="agentshield.telemetry.request.completed",
+                    data={
+                        "method": "POST",
+                        "path": "/v1/chat/completions",
+                        "status_code": 200,
+                        "latency_ms": 50.0,
+                        "eval_passed": eval_result["eval_passed"],
+                        "eval_score": eval_result["score"],
+                        "run_id": rid,
+                    },
+                )
+            except Exception as e:
+                logger.error(f"Failed to emit eval telemetry: {e}")
+        except Exception as e:
+            logger.error(f"Error in complete_run: {e}")
+
+    asyncio.create_task(complete_run())
 
     return {
         "source": "llm_execution",
         "cost_usd": calculated_cost,
         "tenant_id": tenant_id,
         "response": mock_llm_response,
+        "run_id": run_id,
     }

@@ -1,0 +1,26 @@
+models:
+  - model_id: muse-spark-1.3
+    display_name: Muse Spark 1.3
+    provider_id: meta
+    input_cost_per_1k: 0.0001
+    output_cost_per_1k: 0.0003
+  - model_id: muse-code
+    display_name: Muse Code
+    provider_id: meta
+    input_cost_per_1k: 0.0002
+    output_cost_per_1k: 0.0004
+  - model_id: sam-3.1
+    display_name: SAM 3.1
+    provider_id: meta
+    input_cost_per_1k: 0.0005
+    output_cost_per_1k: 0.0010
+  - model_id: gpt-4o
+    display_name: GPT-4o
+    provider_id: openai
+    input_cost_per_1k: 0.005
+    output_cost_per_1k: 0.015
+  - model_id: gpt-4o-mini
+    display_name: GPT-4o Mini
+    provider_id: openai
+    input_cost_per_1k: 0.00015
+    output_cost_per_1k: 0.0006

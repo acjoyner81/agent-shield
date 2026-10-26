@@ -24,7 +24,12 @@ import { SESSION_REDIRECT_LATCH_KEY } from '../errors/error-state.service';
  */
 describe('authGuard', () => {
   let claims: Record<string, unknown> | undefined;
-  let client: { getIdTokenClaims: jasmine.Spy; loginWithRedirect: jasmine.Spy; handleRedirectCallback: jasmine.Spy };
+  let client: {
+    getTokenSilently: jasmine.Spy;
+    getIdTokenClaims: jasmine.Spy;
+    loginWithRedirect: jasmine.Spy;
+    handleRedirectCallback: jasmine.Spy;
+  };
   let router: Router;
   let startUrl: string;
 
@@ -34,6 +39,16 @@ describe('authGuard', () => {
   beforeEach(() => {
     claims = { sub: 'google-oauth2|1', name: 'A J' };
     client = {
+      // The guard primes the SDK with a silent token fetch before reading the
+      // claims cache, so the route is not admitted while a refresh is still in
+      // flight. With no session that fetch is the thing that fails, which is why
+      // the spy rejects when `claims` is unset.
+      getTokenSilently: jasmine.createSpy('getTokenSilently').and.callFake(async () => {
+        if (!claims) {
+          throw new Error('login_required');
+        }
+        return 'access-token';
+      }),
       getIdTokenClaims: jasmine.createSpy('getIdTokenClaims').and.callFake(async () => claims),
       loginWithRedirect: jasmine.createSpy('loginWithRedirect').and.resolveTo(undefined),
       handleRedirectCallback: jasmine.createSpy('handleRedirectCallback').and.resolveTo({}),

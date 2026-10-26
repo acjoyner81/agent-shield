@@ -5,7 +5,7 @@ the rate card in `gateway/config/prices.json`, so editing the file changes the
 next response. The card maps a model name to USD per 1k tokens.
 """
 
-import json
+import yaml
 import logging
 import threading
 from pathlib import Path
@@ -24,44 +24,36 @@ _cache_mtime: Optional[float] = None
 
 
 def _resolve_price_file() -> Optional[Path]:
-    """Locate the rate card, preferring the configured path."""
-    configured = Path(settings.prices_file)
-    candidates = []
-    if configured.is_absolute():
-        candidates.append(configured)
-    else:
-        candidates.append(Path.cwd() / configured)
-        candidates.append(Path(__file__).resolve().parent / "config" / configured.name)
-
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
+    """Deprecated: Pricing now reads directly from the model registry."""
     return None
 
 
 def load_prices() -> Dict[str, float]:
-    """Read the rate card from disk. A missing or malformed file yields no rates."""
-    path = _resolve_price_file()
-    if path is None:
-        logger.warning("No price file found, token cost will report as 0.")
+    """Read the rate card from the model registry YAML. A missing or malformed file yields no rates."""
+    path = Path("gateway/models_registry.yaml")
+    if not path.exists():
+        logger.warning("No model registry found, token cost will report as 0.")
         return {}
 
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        logger.error(f"Failed to read price file {path}: {exc}")
+        logger.error(f"Failed to read registry file {path}: {exc}")
         return {}
 
-    if not isinstance(raw, dict):
-        logger.error(f"Price file {path} must map model name to a number.")
+    if not isinstance(raw, dict) or "models" not in raw:
+        logger.error(f"Registry file {path} must contain a 'models' list.")
         return {}
 
     prices: Dict[str, float] = {}
-    for model, rate in raw.items():
+    for m in raw["models"]:
         try:
-            prices[str(model)] = float(rate)
-        except (TypeError, ValueError):
-            logger.warning(f"Ignoring non numeric rate for model '{model}' in {path}.")
+            model_id = m["model_id"]
+            # For the dashboard summary, we use a simple average of input and output costs
+            avg_cost = (m["input_cost_per_1k"] + m["output_cost_per_1k"]) / 2
+            prices[str(model_id)] = float(avg_cost)
+        except (KeyError, TypeError, ValueError):
+            logger.warning(f"Ignoring invalid price entry for model {m.get('model_id')} in {path}.")
     return prices
 
 
